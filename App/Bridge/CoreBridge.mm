@@ -249,7 +249,7 @@ bool environment_callback(unsigned cmd, void *data) {
         return true;
     }
     case RETRO_ENVIRONMENT_SET_GEOMETRY: {
-        const auto *geometry = static_cast<const retro_geometry *>(data);
+        const auto *geometry = static_cast<const retro_game_geometry *>(data);
         char buffer[128];
         std::snprintf(buffer, sizeof(buffer), "geometry: %ux%u\n", geometry->base_width,
                       geometry->base_height);
