@@ -14,6 +14,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AZ="$ROOT/vendor/azahar"
 BUILD="$ROOT/build/core"
 OUT="$ROOT/vendor-out"
+ENTRY="citra_libretro.cpp.o"
 
 if [[ ! -d "$AZ" ]]; then
     echo "error: vendor/azahar missing; run scripts/fetch-azahar.sh first" >&2
@@ -64,12 +65,24 @@ LIST="$(mktemp)"
         -not -path '*CMakeFiles/CMakeFiles*' -print
 } | sort -u > "$LIST"
 
+# MoltenVK is linked from a prebuilt xcframework slice that may live outside the
+# build tree; include the device slice if the build did not already provide it.
+if ! grep -q 'libMoltenVK\.a' "$LIST"; then
+    MOLTENVK="$(find "$AZ" -path '*MoltenVK.xcframework/ios-arm64*' -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
+    if [ -n "$MOLTENVK" ]; then
+        echo "$MOLTENVK" >> "$LIST"
+        echo "MoltenVK device slice: $MOLTENVK"
+    else
+        echo "warning: no prebuilt MoltenVK device slice found; relying on the build tree" >&2
+    fi
+fi
+
 count="$(wc -l < "$LIST" | tr -d ' ')"
 echo "Merging $count inputs into $OUT/libazahar_core.a"
 
-if ! grep -q 'citra_libretro\.cpp\.o$' "$LIST"; then
+if ! grep -q "/${ENTRY}\$" "$LIST"; then
     echo "error: the libretro entry point object was not collected" >&2
-    find "$BUILD" -path '*citra_libretro*' -name '*.o' | head -20 >&2 || true
+    grep -i 'citra_libretro' "$LIST" | head -20 >&2 || true
     exit 1
 fi
 
@@ -81,14 +94,25 @@ if ! libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST") > "$LIBTOOL_LOG" 
     exit 1
 fi
 tail -5 "$LIBTOOL_LOG" || true
+echo "members: $(ar -t "$OUT/libazahar_core.a" | wc -l | tr -d ' ')"
 
-if ! nm -g "$OUT/libazahar_core.a" 2>/dev/null | grep -q ' _retro_init$'; then
-    echo "error: merged archive does not export retro_init" >&2
-    echo "members: $(ar -t "$OUT/libazahar_core.a" 2>/dev/null | wc -l | tr -d ' ')" >&2
-    echo "global text symbols (sample):" >&2
-    nm -g "$OUT/libazahar_core.a" 2>/dev/null | grep ' T ' | head -20 >&2 || echo "  (none)" >&2
+# Verify the libretro entry point in its own member. Scanning the whole archive is
+# unreliable at this size: nm stops partway through the 1480 members and reports
+# nothing useful.
+VERIFY="$(mktemp -d)"
+if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$ENTRY" ); then
+    echo "error: $ENTRY is missing from the merged archive" >&2
+    rm -rf "$VERIFY"
     exit 1
 fi
+
+if ! nm -g "$VERIFY/$ENTRY" | grep -q '_retro_init'; then
+    echo "error: $ENTRY does not export retro_init" >&2
+    nm -g "$VERIFY/$ENTRY" | head -40 >&2 || true
+    rm -rf "$VERIFY"
+    exit 1
+fi
+rm -rf "$VERIFY"
 
 ls -lh "$OUT/libazahar_core.a"
 echo "Core archive ready."
