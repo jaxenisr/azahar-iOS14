@@ -1,4 +1,5 @@
 #import "CoreBridge.h"
+#import "CoreVulkan.h"
 
 #import <CoreGraphics/CoreGraphics.h>
 
@@ -9,6 +10,7 @@
 #include <string>
 
 #include "libretro.h"
+#include "libretro_vulkan.h"
 
 // Frontend for Azahar's libretro core.
 //
@@ -18,11 +20,12 @@
 // retro_init(), because the core registers its options and directories during
 // initialisation.
 //
-// Rendering is deliberately limited to the core's software rasteriser in this
-// step: it hands finished XRGB8888 frames to the video callback, so playback can
-// be proven (content loads, frames arrive, input reaches the emulator) before the
-// Vulkan presentation path is built. The renderer is chosen with the core's own
-// `graphics_api` option, which this bridge pins to "Software".
+// Rendering: the core prefers Vulkan. For a hardware context it does not load
+// content inside retro_load_game; it hands the frontend a negotiation interface,
+// the frontend creates the device, and loading happens inside the context_reset
+// callback the frontend invokes. When any of that cannot be provided the core
+// falls back to its software rasteriser, and this bridge records the reason so the
+// overlay can report it instead of silently showing 9%.
 
 namespace {
 
@@ -44,6 +47,17 @@ std::atomic<int> g_circle_y{0};
 
 AZCoreFrameCallback g_frame_callback = nullptr;
 void *g_frame_context = nullptr;
+
+// Hardware rendering state.
+AZVulkanHost *g_vulkan = nullptr;
+retro_hw_render_callback *g_hw_render = nullptr;
+void *g_metal_layer = nullptr;
+bool g_want_vulkan = true;
+std::string g_vulkan_error;
+char g_renderer_status[256] = "Software (core rasteriser)";
+unsigned g_source_width = 0;
+unsigned g_source_height = 0;
+
 AZCoreMessageCallback g_message_callback = nullptr;
 void *g_message_context = nullptr;
 
@@ -241,6 +255,9 @@ bool environment_callback(unsigned cmd, void *data) {
         if (av->timing.fps > 1.0) {
             g_frame_rate.store(av->timing.fps);
         }
+        g_source_width = av->geometry.base_width;
+        g_source_height = av->geometry.base_height;
+        AZVulkanHostSetSourceSize(g_vulkan, g_source_width, g_source_height);
         char buffer[192];
         std::snprintf(buffer, sizeof(buffer),
                       "content timing: %.3f fps, geometry %ux%u\n", av->timing.fps,
@@ -250,6 +267,9 @@ bool environment_callback(unsigned cmd, void *data) {
     }
     case RETRO_ENVIRONMENT_SET_GEOMETRY: {
         const auto *geometry = static_cast<const retro_game_geometry *>(data);
+        g_source_width = geometry->base_width;
+        g_source_height = geometry->base_height;
+        AZVulkanHostSetSourceSize(g_vulkan, g_source_width, g_source_height);
         char buffer[128];
         std::snprintf(buffer, sizeof(buffer), "geometry: %ux%u\n", geometry->base_width,
                       geometry->base_height);
@@ -268,13 +288,51 @@ bool environment_callback(unsigned cmd, void *data) {
         *static_cast<unsigned *>(data) = 1;
         return true;
     }
-    case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER:
-        // No Vulkan or GL context is offered, so the core must not pick one.
+    case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
+        if (!g_want_vulkan) {
+            return false;
+        }
+        *static_cast<unsigned *>(data) = static_cast<unsigned>(RETRO_HW_CONTEXT_VULKAN);
+        return true;
+    }
+    case RETRO_ENVIRONMENT_SET_HW_RENDER: {
+        auto *callback = static_cast<retro_hw_render_callback *>(data);
+        if (callback->context_type == RETRO_HW_CONTEXT_VULKAN && g_want_vulkan) {
+            g_hw_render = callback;
+            write_log("info", "core set up a Vulkan hardware context\n");
+            return true;
+        }
+        write_log("warn", "core asked for a hardware context this build cannot provide\n");
         return false;
-    case RETRO_ENVIRONMENT_SET_HW_RENDER:
-    case RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE:
-        write_log("warn", "core asked for a hardware renderer; this build only provides software\n");
-        return false;
+    }
+    case RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE: {
+        if (!g_want_vulkan) {
+            return false;
+        }
+        char error[256] = {0};
+        g_vulkan = AZVulkanHostCreate(g_metal_layer, data, error, sizeof(error));
+        if (g_vulkan == nullptr) {
+            g_vulkan_error = error;
+            std::snprintf(g_renderer_status, sizeof(g_renderer_status),
+                          "Software (Vulkan failed: %s)", error);
+            write_log("error",
+                      (std::string("Vulkan host creation failed: ") + error + "\n").c_str());
+            return false;
+        }
+        std::snprintf(g_renderer_status, sizeof(g_renderer_status), "Vulkan (MoltenVK): %s",
+                      AZVulkanHostDescription(g_vulkan));
+        write_log("info", (std::string("renderer: ") + g_renderer_status + "\n").c_str());
+        return true;
+    }
+    case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
+        static retro_hw_render_interface_vulkan interface {};
+        if (g_vulkan == nullptr || !AZVulkanHostFillInterface(g_vulkan, &interface)) {
+            return false;
+        }
+        *static_cast<retro_hw_render_interface **>(data) =
+            reinterpret_cast<retro_hw_render_interface *>(&interface);
+        return true;
+    }
     case RETRO_ENVIRONMENT_SET_MEMORY_MAPS:
         return true;
     case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE: {
@@ -314,6 +372,11 @@ bool environment_callback(unsigned cmd, void *data) {
 }
 
 void video_refresh(const void *data, unsigned width, unsigned height, size_t pitch) {
+    if (data == RETRO_HW_FRAME_BUFFER_VALID) {
+        // The frame lives on the GPU; set_image already told us which image.
+        AZVulkanHostPresent(g_vulkan);
+        return;
+    }
     if (data == nullptr || g_frame_callback == nullptr || width == 0 || height == 0) {
         return;
     }
@@ -463,6 +526,9 @@ BOOL AZCoreInitialize(NSString *saveDirectory, NSString *systemDirectory) {
     g_last_error.clear();
     g_last_message.clear();
     g_frames_delivered.store(0);
+    g_vulkan_error.clear();
+    std::snprintf(g_renderer_status, sizeof(g_renderer_status), "%s",
+                  g_want_vulkan ? "Vulkan (pending)" : "Software (core rasteriser)");
     g_save_directory = saveDirectory.fileSystemRepresentation ?: "";
     g_system_directory = systemDirectory.fileSystemRepresentation ?: "";
 
@@ -513,6 +579,16 @@ void AZCoreShutdown(void) {
     if (g_game_loaded) {
         retro_unload_game();
         g_game_loaded = false;
+    }
+    if (g_hw_render != nullptr) {
+        if (g_hw_render->context_destroy != nullptr) {
+            g_hw_render->context_destroy();
+        }
+        g_hw_render = nullptr;
+    }
+    if (g_vulkan != nullptr) {
+        AZVulkanHostDestroy(g_vulkan);
+        g_vulkan = nullptr;
     }
     retro_deinit();
     g_initialised = false;
@@ -588,11 +664,38 @@ BOOL AZCoreLoadGame(NSString *path) {
 
     retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
 
+    // With a hardware renderer the core deliberately does not load the content in
+    // retro_load_game: it waits until the frontend has a context, then loads inside
+    // context_reset. So this call is what actually starts the game.
+    if (g_hw_render != nullptr && g_hw_render->context_reset != nullptr) {
+        if (g_vulkan == nullptr) {
+            g_last_error = g_vulkan_error.empty()
+                               ? "the Vulkan context was not created"
+                               : g_vulkan_error;
+            write_log("error", (std::string("content not started: ") + g_last_error + "\n").c_str());
+            retro_unload_game();
+            return NO;
+        }
+        write_log("info", "calling context_reset: loading content with the Vulkan renderer\n");
+        try {
+            g_hw_render->context_reset();
+        } catch (const std::exception &e) {
+            g_last_error = e.what();
+            return NO;
+        } catch (...) {
+            g_last_error = "the core threw an exception while creating the Vulkan context";
+            return NO;
+        }
+    }
+
     struct retro_system_av_info av {};
     retro_get_system_av_info(&av);
     if (av.timing.fps > 1.0) {
         g_frame_rate.store(av.timing.fps);
     }
+    g_source_width = av.geometry.base_width;
+    g_source_height = av.geometry.base_height;
+    AZVulkanHostSetSourceSize(g_vulkan, g_source_width, g_source_height);
     char buffer[192];
     std::snprintf(buffer, sizeof(buffer), "content loaded: %.3f fps, %ux%u\n", av.timing.fps,
                   av.geometry.base_width, av.geometry.base_height);
@@ -610,12 +713,21 @@ void AZCoreRunFrame(void) {
 }
 
 void AZCoreUnloadGame(void) {
-    if (!g_game_loaded) {
-        return;
+    if (g_game_loaded) {
+        retro_unload_game();
+        g_game_loaded = false;
+        write_log("info", "content unloaded\n");
     }
-    retro_unload_game();
-    g_game_loaded = false;
-    write_log("info", "content unloaded\n");
+    if (g_hw_render != nullptr) {
+        if (g_hw_render->context_destroy != nullptr) {
+            g_hw_render->context_destroy();
+        }
+        g_hw_render = nullptr;
+    }
+    if (g_vulkan != nullptr) {
+        AZVulkanHostDestroy(g_vulkan);
+        g_vulkan = nullptr;
+    }
 }
 
 double AZCoreFrameRate(void) {
@@ -640,4 +752,20 @@ NSString *AZCoreLastMessage(void) {
         return nil;
     }
     return [NSString stringWithUTF8String:g_last_message.c_str()];
+}
+
+void AZCoreSetMetalLayer(void *layer) {
+    g_metal_layer = layer;
+}
+
+void AZCoreSetRendererPreference(BOOL preferVulkan) {
+    g_want_vulkan = preferVulkan != NO;
+}
+
+const char *AZCoreRendererName(void) {
+    return g_renderer_status;
+}
+
+BOOL AZCoreUsesHardwareVideo(void) {
+    return g_vulkan != nullptr ? YES : NO;
 }

@@ -1,8 +1,10 @@
 import SwiftUI
 import UIKit
+import QuartzCore
 
-/// Full screen emulation. The core draws into a bitmap; this view hands that
-/// bitmap straight to a layer and keeps the numbers visible.
+/// Full screen emulation. Vulkan draws into a Metal layer; when the core falls
+/// back to its software rasteriser its frames arrive as bitmaps instead. Both
+/// paths share the same overlay so the numbers can always be read.
 struct PlaybackScreen: View {
     @ObservedObject var session: PlaybackSession
     @Environment(\.presentationMode) private var presentationMode
@@ -11,7 +13,23 @@ struct PlaybackScreen: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            content
+            MetalSurfaceView { layer in
+                session.attach(metalLayer: layer)
+            }
+            .ignoresSafeArea()
+
+            if !session.usesHardwareVideo, let image = session.image {
+                FrameImageView(image: image)
+                    .ignoresSafeArea()
+            }
+
+            if case .failed(let reason) = session.phase {
+                failure(reason)
+            } else if session.image == nil && !session.usesHardwareVideo {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+            }
+
             if showsOverlay {
                 overlay
             }
@@ -20,27 +38,6 @@ struct PlaybackScreen: View {
         .statusBar(hidden: true)
         .onAppear { session.startIfNeeded() }
         .onDisappear { session.stop() }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch session.phase {
-        case .failed(let reason):
-            failure(reason)
-        case .running, .finished:
-            if let image = session.image {
-                FrameImageView(image: image)
-                    .ignoresSafeArea()
-            } else {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    Text("Starting \(session.game.title)")
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.6))
-                }
-            }
-        }
     }
 
     private func failure(_ reason: String) -> some View {
@@ -99,6 +96,7 @@ struct PlaybackScreen: View {
             statistic("Speed", String(format: "%.1f%% of real time", session.speedPercent))
             statistic("Frame", String(format: "%.1f ms", session.frameMilliseconds))
             statistic("Renderer", session.rendererName)
+            statistic("Resolution", "\(session.resolutionScale)x")
             statistic("Frames", "\(session.deliveredFrames)")
         }
         .padding(10)
@@ -109,7 +107,7 @@ struct PlaybackScreen: View {
         HStack(spacing: 6) {
             Text(label)
                 .foregroundColor(.green.opacity(0.7))
-                .frame(width: 62, alignment: .leading)
+                .frame(width: 74, alignment: .leading)
             Text(value)
                 .foregroundColor(.green)
         }
@@ -198,8 +196,44 @@ private struct PadButton: View {
     }
 }
 
-/// Draws the core's most recent frame. A layer's contents is the cheapest path
-/// from a CGImage to the screen; no per-frame texture upload is needed.
+/// A UIView backed by a CAMetalLayer, which is what MoltenVK presents into.
+struct MetalSurfaceView: UIViewRepresentable {
+    let onLayer: (CAMetalLayer) -> Void
+
+    func makeUIView(context: Context) -> MetalContainerView {
+        let view = MetalContainerView()
+        if let layer = view.layer as? CAMetalLayer {
+            onLayer(layer)
+        }
+        return view
+    }
+
+    func updateUIView(_ view: MetalContainerView, context: Context) {}
+}
+
+final class MetalContainerView: UIView {
+    override class var layerClass: AnyClass {
+        CAMetalLayer.self
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .black
+        isUserInteractionEnabled = false
+        if let layer = layer as? CAMetalLayer {
+            layer.framebufferOnly = false
+            layer.isOpaque = true
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        backgroundColor = .black
+    }
+}
+
+/// Draws a software-rendered frame. A layer's contents is the cheapest path from
+/// a CGImage to the screen.
 struct FrameImageView: UIViewRepresentable {
     let image: CGImage
 

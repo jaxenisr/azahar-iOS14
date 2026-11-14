@@ -7,6 +7,10 @@
 # their build files we let it compile with their own flags and then merge the
 # resulting objects and static dependencies into a single archive. vendor/azahar
 # stays byte-identical to the release tag.
+#
+# MoltenVK stays a separate archive. libtool folds an input archive in as a
+# single member when it is handed one, and the linker cannot resolve symbols out
+# of a nested archive, so the app links it directly with -lMoltenVK.
 
 set -euo pipefail
 
@@ -46,7 +50,7 @@ cmake --build "$BUILD" --target citra_libretro --config Release -j "$(sysctl -n 
 
 # Objects of the libretro entry point and its object libraries, plus every static
 # archive Azahar and its dependency libraries produced (core, video_core,
-# audio_core, fmt, sirit, dds-ktx, MoltenVK, ...).
+# audio_core, fmt, sirit, dds-ktx, ...).
 #
 # The libretro targets live in a subdirectory, so their objects sit under
 # build/core/src/citra_libretro/CMakeFiles/<target>.dir/ rather than at the top
@@ -64,18 +68,6 @@ LIST="$(mktemp)"
         -not -path '*CMakeFiles/CMakeTmp*' \
         -not -path '*CMakeFiles/CMakeFiles*' -print
 } | sort -u > "$LIST"
-
-# MoltenVK is linked from a prebuilt xcframework slice that may live outside the
-# build tree; include the device slice if the build did not already provide it.
-if ! grep -q 'libMoltenVK\.a' "$LIST"; then
-    MOLTENVK="$(find "$AZ" -path '*MoltenVK.xcframework/ios-arm64*' -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
-    if [ -n "$MOLTENVK" ]; then
-        echo "$MOLTENVK" >> "$LIST"
-        echo "MoltenVK device slice: $MOLTENVK"
-    else
-        echo "warning: no prebuilt MoltenVK device slice found; relying on the build tree" >&2
-    fi
-fi
 
 count="$(wc -l < "$LIST" | tr -d ' ')"
 echo "Merging $count inputs into $OUT/libazahar_core.a"
@@ -96,8 +88,30 @@ fi
 tail -5 "$LIBTOOL_LOG" || true
 echo "members: $(ar -t "$OUT/libazahar_core.a" | wc -l | tr -d ' ')"
 
+# MoltenVK. Azahar links it only for its own Qt/SDL builds, not for libretro
+# targets, so the frontend supplies the Vulkan implementation.
+MOLTENVK="$(find "$ROOT/vendor" -path '*ios-arm64*' -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
+if [ -z "$MOLTENVK" ]; then
+    MOLTENVK="$(find "$ROOT/vendor" -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
+fi
+if [ -z "$MOLTENVK" ]; then
+    echo "error: libMoltenVK.a not found; Vulkan would fail to link" >&2
+    exit 1
+fi
+cp "$MOLTENVK" "$OUT/libMoltenVK.a"
+echo "MoltenVK: $OUT/libMoltenVK.a"
+
+# A cheap sanity check that this is the real library. Both probes read the whole
+# stream: with pipefail, stopping a producer early (grep -q) reports SIGPIPE as a
+# step failure. The app's link step is the real test either way.
+VK_SYMBOLS="$( { strings -a "$OUT/libMoltenVK.a" 2>/dev/null || true; } | grep -c 'vkCreateInstance' || true )"
+if [ "${VK_SYMBOLS:-0}" -eq 0 ]; then
+    echo "error: $OUT/libMoltenVK.a does not mention vkCreateInstance" >&2
+    exit 1
+fi
+
 # Verify the libretro entry point in its own member. Scanning the whole archive is
-# unreliable at this size: nm stops partway through the 1480 members and reports
+# unreliable at this size: nm stops partway through the members and reports
 # nothing useful.
 VERIFY="$(mktemp -d)"
 if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$ENTRY" ); then
@@ -106,13 +120,14 @@ if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$ENTRY" ); then
     exit 1
 fi
 
-if ! nm -g "$VERIFY/$ENTRY" | grep -q '_retro_init'; then
+ENTRY_SYMBOLS="$( { nm -g "$VERIFY/$ENTRY" 2>/dev/null || true; } )"
+if ! printf '%s' "$ENTRY_SYMBOLS" | grep -q '_retro_init'; then
     echo "error: $ENTRY does not export retro_init" >&2
-    nm -g "$VERIFY/$ENTRY" | head -40 >&2 || true
+    printf '%s\n' "$ENTRY_SYMBOLS" | head -40 >&2
     rm -rf "$VERIFY"
     exit 1
 fi
 rm -rf "$VERIFY"
 
-ls -lh "$OUT/libazahar_core.a"
+ls -lh "$OUT"/*.a
 echo "Core archive ready."
