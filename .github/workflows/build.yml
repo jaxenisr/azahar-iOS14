@@ -1,0 +1,117 @@
+name: build-ipa
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Only what is needed to read the code and (optionally) attach a release.
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Section 7 build contract. These must not drift.
+  IPHONEOS_DEPLOYMENT_TARGET: "14.0"
+  SCHEME: AzaharIPad
+
+jobs:
+  ipa:
+    # macOS runner with an Xcode 16.x toolchain. Xcode 26's own deployment-target
+    # range starts at iOS 15, so it is deliberately not used for a 14.0 target.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16.x
+        run: |
+          set -euo pipefail
+          candidates="$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V || true)"
+          if [ -z "$candidates" ]; then
+            echo "::error::No Xcode 16.x on this runner. Installed:"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          pick="$(echo "$candidates" | tail -1)"
+          echo "Selecting $pick"
+          sudo xcode-select -s "$pick"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Fetch pinned Azahar
+        run: bash scripts/fetch-azahar.sh
+
+      - name: Build core for iOS 14 arm64
+        run: bash scripts/build-core.sh
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project AzaharIPad.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package and ad-hoc sign IPA
+        run: |
+          set -euo pipefail
+          APP="$(find build/dd/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)"
+          echo "App: $APP"
+          rm -rf Payload Azahar.ipa
+          mkdir -p Payload
+          cp -R "$APP" "Payload/$(basename "$APP")"
+          # Ad-hoc signature for TrollStore. No certificate, no profile, no team.
+          codesign --force --sign - --timestamp=none "Payload/$(basename "$APP")"
+          zip -qry Azahar.ipa Payload
+          bash scripts/verify-binaries.sh "Payload/$(basename "$APP")"
+          du -h Azahar.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Azahar-ipa
+          path: Azahar.ipa
+          if-no-files-found: error
+
+      # Release publishing is gated on a token that belongs to the repository
+      # owner. Without it nothing is published, so no bot account ever appears as
+      # the release author.
+      - name: Publish release as Jaxenisr
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_PAT:-}" ]; then
+            echo "RELEASE_PAT is not set: skipping release. Download the Azahar-ipa artifact instead."
+            exit 0
+          fi
+          git config user.name "Jaxenisr"
+          git config user.email "Jaxenisr@users.noreply.github.com"
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' App/Info.plist)"
+          TAG="v${VERSION}"
+          echo "Tagging $TAG as Jaxenisr"
+          git tag -f -a "$TAG" -m "Azahar for iPadOS 14 $TAG"
+          git push "https://x-access-token:${RELEASE_PAT}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${TAG}" --force
+          echo "Attaching IPA to $TAG"
+          GH_TOKEN="$RELEASE_PAT" gh release create "$TAG" Azahar.ipa \
+            --title "Azahar for iPadOS 14 $TAG" \
+            --notes "Ad-hoc signed IPA for TrollStore, built from $(git rev-parse --short HEAD) against Azahar $(cat vendor/azahar/COMMIT 2>/dev/null || echo 'pinned tag')." \
+            --repo "$GITHUB_REPOSITORY" || \
+          GH_TOKEN="$RELEASE_PAT" gh release upload "$TAG" Azahar.ipa --clobber --repo "$GITHUB_REPOSITORY"
