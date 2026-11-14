@@ -163,6 +163,7 @@ struct GameDetailView: View {
     @Environment(\.presentationMode) private var presentationMode
     @State private var session: PlaybackSession?
     @State private var resolutionScale = 1
+    @State private var layout: PlaybackLayout = .largeScreen
 
     var body: some View {
         ZStack {
@@ -193,7 +194,8 @@ struct GameDetailView: View {
                     Button(action: {
                         session = PlaybackSession(game: game,
                                                   coreDirectory: library.coreDirectory,
-                                                  resolutionScale: resolutionScale)
+                                                  resolutionScale: resolutionScale,
+                                                  layout: layout)
                     }) {
                         HStack(spacing: 8) {
                             Image(systemName: "play.fill")
@@ -208,6 +210,8 @@ struct GameDetailView: View {
                     .padding(.top, 4)
 
                     resolutionPicker
+
+                    layoutPicker
 
                     requirements
 
@@ -249,6 +253,38 @@ struct GameDetailView: View {
                             .frame(width: 54, height: 30)
                             .background(
                                 Capsule().fill(resolutionScale == scale
+                                               ? Color.white.opacity(0.85)
+                                               : Color.white.opacity(0.12))
+                            )
+                    }
+                }
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 28)
+    }
+
+    private var layoutPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Screen layout")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.45))
+                Spacer()
+                Text("applied when playback starts")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            HStack(spacing: 8) {
+                ForEach(PlaybackLayout.allCases) { option in
+                    Button(action: { layout = option }) {
+                        Text(option.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(layout == option ? .black : .white.opacity(0.8))
+                            .padding(.horizontal, 16)
+                            .frame(height: 30)
+                            .background(
+                                Capsule().fill(layout == option
                                                ? Color.white.opacity(0.85)
                                                : Color.white.opacity(0.12))
                             )
