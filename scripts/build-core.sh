@@ -101,10 +101,11 @@ fi
 cp "$MOLTENVK" "$OUT/libMoltenVK.a"
 echo "MoltenVK: $OUT/libMoltenVK.a"
 
-# nm output for Mach-O is not always available in this container, and the app's
-# link step is the real test; this only catches an obviously wrong file.
-if ! { nm -g "$OUT/libMoltenVK.a" 2>/dev/null || strings -a "$OUT/libMoltenVK.a"; } \
-    | grep -q 'vkCreateInstance'; then
+# A cheap sanity check that this is the real library. Both probes read the whole
+# stream: with pipefail, stopping a producer early (grep -q) reports SIGPIPE as a
+# step failure. The app's link step is the real test either way.
+VK_SYMBOLS="$( { strings -a "$OUT/libMoltenVK.a" 2>/dev/null || true; } | grep -c 'vkCreateInstance' || true )"
+if [ "${VK_SYMBOLS:-0}" -eq 0 ]; then
     echo "error: $OUT/libMoltenVK.a does not mention vkCreateInstance" >&2
     exit 1
 fi
@@ -119,9 +120,10 @@ if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$ENTRY" ); then
     exit 1
 fi
 
-if ! nm -g "$VERIFY/$ENTRY" | grep -q '_retro_init'; then
+ENTRY_SYMBOLS="$( { nm -g "$VERIFY/$ENTRY" 2>/dev/null || true; } )"
+if ! printf '%s' "$ENTRY_SYMBOLS" | grep -q '_retro_init'; then
     echo "error: $ENTRY does not export retro_init" >&2
-    nm -g "$VERIFY/$ENTRY" | head -40 >&2 || true
+    printf '%s\n' "$ENTRY_SYMBOLS" | head -40 >&2
     rm -rf "$VERIFY"
     exit 1
 fi
