@@ -67,19 +67,28 @@ LIST="$(mktemp)"
 
 # MoltenVK. Azahar does not build or link it for libretro targets, so the
 # frontend supplies it: scripts/fetch-azahar.sh leaves the ios-arm64 static slice
-# in vendor/moltenvk. It is merged here so the app links one archive.
+# in vendor/moltenvk. Its objects are extracted and merged individually because
+# handing libtool the archive itself folds it in as one member, which the linker
+# then cannot resolve symbols from.
+MVK_DIR=""
 if ! grep -q 'libMoltenVK\.a' "$LIST"; then
     MOLTENVK="$(find "$ROOT/vendor" -path '*ios-arm64*' -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
     if [ -z "$MOLTENVK" ]; then
         MOLTENVK="$(find "$ROOT/vendor" -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
     fi
-    if [ -n "$MOLTENVK" ]; then
-        echo "$MOLTENVK" >> "$LIST"
-        echo "MoltenVK: $MOLTENVK"
-    else
+    if [ -z "$MOLTENVK" ]; then
         echo "error: libMoltenVK.a not found; Vulkan would fail to link" >&2
         exit 1
     fi
+    echo "MoltenVK: $MOLTENVK"
+    MVK_DIR="$(mktemp -d)"
+    ( cd "$MVK_DIR" && ar -x "$MOLTENVK" )
+    if ! nm -g "$MVK_DIR"/*.o 2>/dev/null | grep -q ' T _vkCreateInstance'; then
+        echo "error: $MOLTENVK does not define vkCreateInstance" >&2
+        rm -rf "$MVK_DIR"
+        exit 1
+    fi
+    find "$MVK_DIR" -name '*.o' -print >> "$LIST"
 fi
 
 count="$(wc -l < "$LIST" | tr -d ' ')"
@@ -88,6 +97,7 @@ echo "Merging $count inputs into $OUT/libazahar_core.a"
 if ! grep -q "/${ENTRY}\$" "$LIST"; then
     echo "error: the libretro entry point object was not collected" >&2
     grep -i 'citra_libretro' "$LIST" | head -20 >&2 || true
+    rm -rf "$MVK_DIR"
     exit 1
 fi
 
@@ -96,30 +106,31 @@ LIBTOOL_LOG="$ROOT/build/libtool.log"
 if ! libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST") > "$LIBTOOL_LOG" 2>&1; then
     echo "error: libtool failed to merge objects" >&2
     tail -20 "$LIBTOOL_LOG" >&2
+    rm -rf "$MVK_DIR"
     exit 1
 fi
 tail -5 "$LIBTOOL_LOG" || true
 echo "members: $(ar -t "$OUT/libazahar_core.a" | wc -l | tr -d ' ')"
 
-# Verify the Vulkan entry points and the libretro entry point actually landed.
+# Verify the libretro entry point in its own member. Scanning the whole archive is
+# unreliable at this size: nm stops partway through the members and reports
+# nothing useful.
 VERIFY="$(mktemp -d)"
 if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$ENTRY" ); then
     echo "error: $ENTRY is missing from the merged archive" >&2
-    rm -rf "$VERIFY"
+    rm -rf "$VERIFY" "$MVK_DIR"
     exit 1
 fi
 
 if ! nm -g "$VERIFY/$ENTRY" | grep -q '_retro_init'; then
     echo "error: $ENTRY does not export retro_init" >&2
     nm -g "$VERIFY/$ENTRY" | head -40 >&2 || true
-    rm -rf "$VERIFY"
+    rm -rf "$VERIFY" "$MVK_DIR"
     exit 1
 fi
 rm -rf "$VERIFY"
-
-if ! nm -g "$OUT/libazahar_core.a" 2>/dev/null | grep -q ' T _vkCreateInstance'; then
-    echo "error: the merged archive does not define vkCreateInstance; MoltenVK is not in it" >&2
-    exit 1
+if [ -n "$MVK_DIR" ]; then
+    rm -rf "$MVK_DIR"
 fi
 
 ls -lh "$OUT/libazahar_core.a"
