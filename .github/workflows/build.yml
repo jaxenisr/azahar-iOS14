@@ -100,17 +100,9 @@ jobs:
 
       - name: Package and ad-hoc sign IPA
         run: |
-          set -euo pipefail
-          APP="$(find build/dd/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)"
-          echo "App: $APP"
-          rm -rf Payload Azahar.ipa
-          mkdir -p Payload
-          cp -R "$APP" "Payload/$(basename "$APP")"
-          # Ad-hoc signature for TrollStore. No certificate, no profile, no team.
-          codesign --force --sign - --timestamp=none "Payload/$(basename "$APP")"
-          zip -qry Azahar.ipa Payload
-          bash scripts/verify-binaries.sh "Payload/$(basename "$APP")"
-          du -h Azahar.ipa
+          set -o pipefail
+          mkdir -p build
+          bash scripts/package-ipa.sh 2>&1 | tee build/package.log
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -171,7 +163,11 @@ jobs:
               echo "--- xcodebuild (last 120 lines) ---"
               tail -n 120 build/xcodebuild.log
             fi
-            if [ ! -f build/core-build.log ] && [ ! -f build/xcodebuild.log ]; then
+            if [ -f build/package.log ]; then
+              echo "--- packaging (last 80 lines) ---"
+              tail -n 80 build/package.log
+            fi
+            if [ ! -f build/core-build.log ] && [ ! -f build/xcodebuild.log ] && [ ! -f build/package.log ]; then
               echo "--- no build log was produced ---"
               ls -la build 2>/dev/null || echo "(no build directory)"
             fi
