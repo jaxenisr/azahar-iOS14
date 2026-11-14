@@ -45,8 +45,8 @@ settings:
       - $(inherited)
       - $(SRCROOT)/vendor/azahar/src
       - $(SRCROOT)/vendor/azahar/externals/libretro-common/libretro-common/include
+      - $(SRCROOT)/vendor/azahar/externals/vulkan-headers/include
     LIBRARY_SEARCH_PATHS:
-      - $(inherited)
       - $(SRCROOT)/vendor-out
 
 targets:
