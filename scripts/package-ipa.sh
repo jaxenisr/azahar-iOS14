@@ -31,7 +31,8 @@ ditto "$APP" "$BUNDLE"
 echo "== sign =="
 xattr -cr "$BUNDLE"
 codesign --force --sign - --timestamp=none --verbose=2 "$BUNDLE"
-codesign --verify --verbose=2 "$BUNDLE"
+# --deep so the embedded back-deployment library is checked too.
+codesign --verify --deep --strict --verbose=2 "$BUNDLE"
 
 echo "== zip =="
 ( cd "$ROOT" && zip -qry Azahar.ipa Payload )

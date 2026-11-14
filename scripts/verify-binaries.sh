@@ -5,8 +5,11 @@
 #   - every Mach-O must be arm64 only (no arm64e, no x86_64, no simulator slice)
 #   - every Mach-O must declare a minimum OS of 14.0 or lower
 #   - no Mach-O may contain LC_DYLD_CHAINED_FIXUPS
-#   - no dylib or framework may be shipped (iOS cannot load them here, and
-#     bundling a prebuilt one is how a newer minimum OS sneaks in)
+#   - no dylib or framework may be shipped, except Apple's Swift-concurrency
+#     back-deployment library that the toolchain embeds for targets below iOS 15.
+#     That one is allowed only at its exact path, and the per-binary checks below
+#     still have to clear it: it is arm64 and its minimum OS is far below 14.0, so
+#     it cannot raise the launch floor.
 #
 # Usage: scripts/verify-binaries.sh Payload/Azahar.app
 
@@ -18,18 +21,26 @@ if [[ -z "$APP" || ! -d "$APP" ]]; then
     exit 2
 fi
 
+# The single exception, by exact bundle-relative path.
+ALLOWED_DYLIB="Frameworks/libswift_Concurrency.dylib"
+
 fail=0
 checked=0
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 echo "== dylibs / frameworks in bundle =="
-if find "$APP" \( -name '*.dylib' -o -name '*.framework' \) -print | grep -q .; then
-    find "$APP" \( -name '*.dylib' -o -name '*.framework' \) -print
-    echo "FAIL: bundled dylib/framework present"
+while IFS= read -r -d '' f; do
+    rel="${f#"$APP"/}"
+    if [[ "$rel" == "$ALLOWED_DYLIB" ]]; then
+        echo "OK: $rel  (Apple Swift concurrency back-deployment, checked below)"
+        continue
+    fi
+    echo "FAIL: bundled $rel"
     fail=1
-else
-    echo "OK: none"
+done < <(find "$APP" \( -name '*.dylib' -o -name '*.framework' \) -print0)
+if [[ "$fail" -eq 0 ]]; then
+    echo "(nothing else bundled)"
 fi
 
 echo
@@ -72,13 +83,9 @@ while IFS= read -r -d '' f; do
     fi
 
     if command -v dyld_info >/dev/null 2>&1; then
-        if dyld_info -fixups "$f" 2>/dev/null | grep -qi 'fixup'; then
-            # dyld_info prints a header even for binaries without fixup chains;
-            # only a non-empty chain listing is a failure.
-            if dyld_info -fixups "$f" 2>/dev/null | grep -qiE '^[[:space:]]*(0x)?[0-9a-f]+[[:space:]]+0x'; then
-                echo "FAIL dyld   $rel  (dyld_info reports fixup chains)"
-                fail=1
-            fi
+        if dyld_info -fixups "$f" 2>/dev/null | grep -qiE '^[[:space:]]*(0x)?[0-9a-f]+[[:space:]]+0x'; then
+            echo "FAIL dyld   $rel  (dyld_info reports fixup chains)"
+            fail=1
         fi
     fi
 
