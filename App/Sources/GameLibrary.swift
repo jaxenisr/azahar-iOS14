@@ -113,7 +113,7 @@ final class GameLibrary: ObservableObject {
 
             let metadata = ROMReader.read(url: url, fileExtension: ext)
             let title = metadata.title ?? url.deletingPathExtension().lastPathComponent
-            let subtitle = "\(ext.uppercased())  .  \(GameLibrary.format(size))"
+            let subtitle = "\(ext.uppercased())  ·  \(GameLibrary.format(size))"
             entries.append(GameEntry(id: name,
                                      url: url,
                                      title: title,
@@ -121,6 +121,37 @@ final class GameLibrary: ObservableObject {
                                      subtitle: subtitle))
         }
         return entries
+    }
+
+    // MARK: - Content requirements
+
+    struct CoreFileStatus: Identifiable {
+        let id: String
+        let note: String
+        let present: Bool
+    }
+
+    /// What the core reads from its own user directory beyond the ROM. These are
+    /// the paths Azahar uses; whether each one exists is the only claim this screen
+    /// makes, and the core still has the final say when it loads the content.
+    func coreFileStatus() -> [CoreFileStatus] {
+        func exists(_ relative: String) -> Bool {
+            fileManager.fileExists(atPath: coreDirectory.appendingPathComponent(relative).path)
+        }
+        return [
+            CoreFileStatus(id: "sysdata",
+                           note: "system archives (font, region, console data)",
+                           present: exists("sysdata")),
+            CoreFileStatus(id: "nand",
+                           note: "emulated console storage and save data",
+                           present: exists("nand")),
+            CoreFileStatus(id: "sysdata/aes_keys.txt",
+                           note: "decryption keys, only needed for encrypted dumps",
+                           present: exists("sysdata/aes_keys.txt")),
+            CoreFileStatus(id: "sysdata/seeddb.bin",
+                           note: "title seeds, only needed for seeded eShop content",
+                           present: exists("sysdata/seeddb.bin"))
+        ]
     }
 
     // MARK: - Core
