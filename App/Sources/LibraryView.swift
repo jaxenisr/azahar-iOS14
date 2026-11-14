@@ -162,6 +162,7 @@ struct GameDetailView: View {
     @EnvironmentObject private var library: GameLibrary
     @Environment(\.presentationMode) private var presentationMode
     @State private var session: PlaybackSession?
+    @State private var resolutionScale = 1
 
     var body: some View {
         ZStack {
@@ -190,7 +191,9 @@ struct GameDetailView: View {
                     infoRow("Core check", library.coreStatus)
 
                     Button(action: {
-                        session = PlaybackSession(game: game, coreDirectory: library.coreDirectory)
+                        session = PlaybackSession(game: game,
+                                                  coreDirectory: library.coreDirectory,
+                                                  resolutionScale: resolutionScale)
                     }) {
                         HStack(spacing: 8) {
                             Image(systemName: "play.fill")
@@ -203,6 +206,8 @@ struct GameDetailView: View {
                         .background(Capsule().fill(Color.white.opacity(0.16)))
                     }
                     .padding(.top, 4)
+
+                    resolutionPicker
 
                     requirements
 
@@ -222,6 +227,37 @@ struct GameDetailView: View {
         .fullScreenCover(item: $session) { session in
             PlaybackScreen(session: session)
         }
+    }
+
+    private var resolutionPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Resolution scale")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.45))
+                Spacer()
+                Text("\(resolutionScale)x · applied when playback starts")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            HStack(spacing: 8) {
+                ForEach(1...4, id: \.self) { scale in
+                    Button(action: { resolutionScale = scale }) {
+                        Text("\(scale)x")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(resolutionScale == scale ? .black : .white.opacity(0.8))
+                            .frame(width: 54, height: 30)
+                            .background(
+                                Capsule().fill(resolutionScale == scale
+                                               ? Color.white.opacity(0.85)
+                                               : Color.white.opacity(0.12))
+                            )
+                    }
+                }
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 28)
     }
 
     private var requirements: some View {
