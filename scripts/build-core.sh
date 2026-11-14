@@ -46,7 +46,7 @@ cmake --build "$BUILD" --target citra_libretro --config Release -j "$(sysctl -n 
 
 # Objects of the libretro entry point and its object libraries, plus every static
 # archive Azahar and its dependency libraries produced (core, video_core,
-# audio_core, fmt, sirit, dds-ktx, MoltenVK, ...).
+# audio_core, fmt, sirit, dds-ktx, ...).
 #
 # The libretro targets live in a subdirectory, so their objects sit under
 # build/core/src/citra_libretro/CMakeFiles/<target>.dir/ rather than at the top
@@ -65,15 +65,20 @@ LIST="$(mktemp)"
         -not -path '*CMakeFiles/CMakeFiles*' -print
 } | sort -u > "$LIST"
 
-# MoltenVK is linked from a prebuilt xcframework slice that may live outside the
-# build tree; include the device slice if the build did not already provide it.
+# MoltenVK. Azahar does not build or link it for libretro targets, so the
+# frontend supplies it: scripts/fetch-azahar.sh leaves the ios-arm64 static slice
+# in vendor/moltenvk. It is merged here so the app links one archive.
 if ! grep -q 'libMoltenVK\.a' "$LIST"; then
-    MOLTENVK="$(find "$AZ" -path '*MoltenVK.xcframework/ios-arm64*' -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
+    MOLTENVK="$(find "$ROOT/vendor" -path '*ios-arm64*' -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
+    if [ -z "$MOLTENVK" ]; then
+        MOLTENVK="$(find "$ROOT/vendor" -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
+    fi
     if [ -n "$MOLTENVK" ]; then
         echo "$MOLTENVK" >> "$LIST"
-        echo "MoltenVK device slice: $MOLTENVK"
+        echo "MoltenVK: $MOLTENVK"
     else
-        echo "warning: no prebuilt MoltenVK device slice found; relying on the build tree" >&2
+        echo "error: libMoltenVK.a not found; Vulkan would fail to link" >&2
+        exit 1
     fi
 fi
 
@@ -96,9 +101,7 @@ fi
 tail -5 "$LIBTOOL_LOG" || true
 echo "members: $(ar -t "$OUT/libazahar_core.a" | wc -l | tr -d ' ')"
 
-# Verify the libretro entry point in its own member. Scanning the whole archive is
-# unreliable at this size: nm stops partway through the 1480 members and reports
-# nothing useful.
+# Verify the Vulkan entry points and the libretro entry point actually landed.
 VERIFY="$(mktemp -d)"
 if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$ENTRY" ); then
     echo "error: $ENTRY is missing from the merged archive" >&2
@@ -113,6 +116,11 @@ if ! nm -g "$VERIFY/$ENTRY" | grep -q '_retro_init'; then
     exit 1
 fi
 rm -rf "$VERIFY"
+
+if ! nm -g "$OUT/libazahar_core.a" 2>/dev/null | grep -q ' T _vkCreateInstance'; then
+    echo "error: the merged archive does not define vkCreateInstance; MoltenVK is not in it" >&2
+    exit 1
+fi
 
 ls -lh "$OUT/libazahar_core.a"
 echo "Core archive ready."
