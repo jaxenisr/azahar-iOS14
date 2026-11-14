@@ -2,6 +2,25 @@ import Foundation
 import CoreGraphics
 import QuartzCore
 
+/// How the 3DS's two screens are arranged in the frame the core produces.
+/// These are the core's own layout options (`citra_layout_option`), so the core
+/// composes the frame and the present path only has to keep its aspect ratio.
+enum PlaybackLayout: String, CaseIterable, Identifiable {
+    case largeScreen = "large_screen"
+    case sideBySide = "side_by_side"
+    case topOnly = "single_screen"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .largeScreen: return "Top large"
+        case .sideBySide: return "Side by side"
+        case .topOnly: return "Top only"
+        }
+    }
+}
+
 /// Runs one emulation session.
 ///
 /// The core is single threaded from the frontend's point of view: it is
@@ -37,10 +56,12 @@ final class PlaybackSession: ObservableObject, Identifiable {
     let id = UUID()
     let game: GameEntry
     let resolutionScale: Int
+    let layout: PlaybackLayout
 
     @Published private(set) var phase: Phase = .running
     @Published private(set) var image: CGImage?
     @Published private(set) var framesPerSecond: Double = 0
+    @Published private(set) var targetFramesPerSecond: Double = 0
     @Published private(set) var speedPercent: Double = 0
     @Published private(set) var frameMilliseconds: Double = 0
     @Published private(set) var deliveredFrames: UInt64 = 0
@@ -57,10 +78,14 @@ final class PlaybackSession: ObservableObject, Identifiable {
     private var latestImage: CGImage?
     private var deliveryPending = false
 
-    init(game: GameEntry, coreDirectory: URL, resolutionScale: Int = 1) {
+    init(game: GameEntry,
+         coreDirectory: URL,
+         resolutionScale: Int = 1,
+         layout: PlaybackLayout = .largeScreen) {
         self.game = game
         self.coreDirectory = coreDirectory
         self.resolutionScale = min(max(resolutionScale, 1), 4)
+        self.layout = layout
     }
 
     /// The Metal layer the Vulkan renderer presents into. It has to exist before
@@ -148,6 +173,8 @@ final class PlaybackSession: ObservableObject, Identifiable {
         AZCoreSetOption("graphics_api", "Vulkan")
         AZCoreSetOption("citra_resolution_factor", "\(resolutionScale)")
         AZCoreSetOption("resolution_factor", "\(resolutionScale)")
+        AZCoreSetOption("citra_layout_option", layout.rawValue)
+        AZCoreSetOption("layout_option", layout.rawValue)
 
         guard AZCoreInitialize(coreDirectory.path, coreDirectory.path) else {
             fail(AZCoreLastError() ?? "the core failed to initialise")
@@ -181,27 +208,33 @@ final class PlaybackSession: ObservableObject, Identifiable {
 
         var targetInterval = 1.0 / max(AZCoreFrameRate(), 1.0)
         var reportStart = CACurrentMediaTime()
-        var framesAtReport = AZCoreFramesDelivered()
+        var framesAtReport: UInt64 = 0
+        var delivered: UInt64 = 0
         var emulatedSeconds = 0.0
 
         while wantsToRun {
             let frameStart = CACurrentMediaTime()
             AZCoreRunFrame()
             let frameEnd = CACurrentMediaTime()
+            // One retro_run is one frame, whichever renderer produced it. Counting
+            // here rather than in the video callback keeps the numbers honest when
+            // a GPU frame arrives as a handle instead of a bitmap.
+            delivered &+= 1
             emulatedSeconds += frameEnd - frameStart
 
             let elapsed = frameEnd - reportStart
             if elapsed >= 0.5 {
-                let delivered = AZCoreFramesDelivered()
-                let frames = Double(delivered &- framesAtReport)
-                let measuredFps = frames / elapsed
-                let emulatedMs = frames > 0 ? (emulatedSeconds / frames) * 1000 : 0
+                let frames = delivered &- framesAtReport
+                let measuredFps = Double(frames) / elapsed
+                let emulatedMs = frames > 0 ? (emulatedSeconds / Double(frames)) * 1000 : 0
                 // How fast the emulator runs relative to the 3DS's own frame rate.
                 let speed = emulatedMs > 0 ? (targetInterval * 1000 / emulatedMs) * 100 : 0
                 let name = String(cString: AZCoreRendererName())
+                let targetFps = AZCoreFrameRate()
 
                 publish { session in
                     session.framesPerSecond = measuredFps
+                    session.targetFramesPerSecond = targetFps
                     session.speedPercent = speed
                     session.frameMilliseconds = emulatedMs
                     session.deliveredFrames = delivered
