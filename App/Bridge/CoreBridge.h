@@ -9,7 +9,7 @@ typedef void (*AZCoreFrameCallback)(CGImageRef _Nullable image, void *_Nullable 
 
 /// Called when the core shows a message to the user (missing system files, an
 /// encrypted ROM, a fatal error). The string is only valid for the call.
-typedef void (*AZCoreMessageCallback)(const char *message, void *_Nullable context);
+typedef void (*AZCoreMessageCallback)(const char *_Nullable message, void *_Nullable context);
 
 /// libretro API version reported by the linked Azahar core.
 FOUNDATION_EXPORT unsigned AZCoreAPIVersion(void);
