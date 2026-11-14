@@ -36,6 +36,7 @@ final class PlaybackSession: ObservableObject, Identifiable {
 
     let id = UUID()
     let game: GameEntry
+    let resolutionScale: Int
 
     @Published private(set) var phase: Phase = .running
     @Published private(set) var image: CGImage?
@@ -44,10 +45,8 @@ final class PlaybackSession: ObservableObject, Identifiable {
     @Published private(set) var frameMilliseconds: Double = 0
     @Published private(set) var deliveredFrames: UInt64 = 0
     @Published private(set) var coreMessage: String?
-
-    /// The renderer this session asks the core for. The software rasteriser is the
-    /// only one this build can present, so it is pinned rather than negotiated.
-    let rendererName = "Software (core rasteriser)"
+    @Published private(set) var rendererName = "starting"
+    @Published private(set) var usesHardwareVideo = false
 
     private let coreDirectory: URL
     private var thread: Thread?
@@ -58,9 +57,16 @@ final class PlaybackSession: ObservableObject, Identifiable {
     private var latestImage: CGImage?
     private var deliveryPending = false
 
-    init(game: GameEntry, coreDirectory: URL) {
+    init(game: GameEntry, coreDirectory: URL, resolutionScale: Int = 1) {
         self.game = game
         self.coreDirectory = coreDirectory
+        self.resolutionScale = min(max(resolutionScale, 1), 4)
+    }
+
+    /// The Metal layer the Vulkan renderer presents into. It has to exist before
+    /// the core is loaded, because the core asks for a device during load.
+    func attach(metalLayer: CAMetalLayer) {
+        AZCoreSetMetalLayer(Unmanaged.passUnretained(metalLayer).toOpaque())
     }
 
     func startIfNeeded() {
@@ -134,14 +140,14 @@ final class PlaybackSession: ObservableObject, Identifiable {
     // MARK: - Emulation thread
 
     private func run() {
-        // Pin the renderer before the core registers its options: the override wins
-        // over the core's own default.
-        AZCoreSetOption("citra_graphics_api", "Software")
-        AZCoreSetOption("graphics_api", "Software")
-        // Keep the internal resolution at native size; the software rasteriser is
-        // slower than real time already.
-        AZCoreSetOption("citra_resolution_factor", "1")
-        AZCoreSetOption("resolution_factor", "1")
+        // Ask for the hardware renderer. The bridge only falls back to the core's
+        // software path when a stage of Vulkan setup fails, and it keeps the reason,
+        // which the overlay then shows.
+        AZCoreSetRendererPreference(true)
+        AZCoreSetOption("citra_graphics_api", "Vulkan")
+        AZCoreSetOption("graphics_api", "Vulkan")
+        AZCoreSetOption("citra_resolution_factor", "\(resolutionScale)")
+        AZCoreSetOption("resolution_factor", "\(resolutionScale)")
 
         guard AZCoreInitialize(coreDirectory.path, coreDirectory.path) else {
             fail(AZCoreLastError() ?? "the core failed to initialise")
@@ -162,6 +168,13 @@ final class PlaybackSession: ObservableObject, Identifiable {
             return
         }
 
+        let renderer = String(cString: AZCoreRendererName())
+        let hardware = AZCoreUsesHardwareVideo()
+        publish { session in
+            session.rendererName = renderer
+            session.usesHardwareVideo = hardware
+        }
+
         if let message = AZCoreLastMessage() {
             publishMessage(message)
         }
@@ -170,21 +183,12 @@ final class PlaybackSession: ObservableObject, Identifiable {
         var reportStart = CACurrentMediaTime()
         var framesAtReport = AZCoreFramesDelivered()
         var emulatedSeconds = 0.0
-        var firstFrameLogged = false
 
         while wantsToRun {
             let frameStart = CACurrentMediaTime()
             AZCoreRunFrame()
             let frameEnd = CACurrentMediaTime()
             emulatedSeconds += frameEnd - frameStart
-
-            if !firstFrameLogged, AZCoreFramesDelivered() > 0 {
-                firstFrameLogged = true
-                let firstFrameMs = (frameEnd - frameStart) * 1000
-                publish { session in
-                    session.frameMilliseconds = firstFrameMs
-                }
-            }
 
             let elapsed = frameEnd - reportStart
             if elapsed >= 0.5 {
@@ -194,12 +198,14 @@ final class PlaybackSession: ObservableObject, Identifiable {
                 let emulatedMs = frames > 0 ? (emulatedSeconds / frames) * 1000 : 0
                 // How fast the emulator runs relative to the 3DS's own frame rate.
                 let speed = emulatedMs > 0 ? (targetInterval * 1000 / emulatedMs) * 100 : 0
+                let name = String(cString: AZCoreRendererName())
 
                 publish { session in
                     session.framesPerSecond = measuredFps
                     session.speedPercent = speed
                     session.frameMilliseconds = emulatedMs
                     session.deliveredFrames = delivered
+                    session.rendererName = name
                 }
 
                 if let message = AZCoreLastMessage() {
