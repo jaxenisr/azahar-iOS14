@@ -64,7 +64,10 @@ jobs:
           xcodebuild -version
 
       - name: Build core for iOS 14 arm64
-        run: bash scripts/build-core.sh
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/build-core.sh 2>&1 | tee build/core-build.log
 
       - name: Select Xcode 16.x for the app
         run: |
@@ -154,11 +157,19 @@ jobs:
             echo '```'
             if [ -f build/core-build.log ]; then
               echo "--- core build (last 120 lines) ---"
-              tail -n 120 build/core-build.log || true
+              tail -n 120 build/core-build.log
+            fi
+            if [ -f build/libtool.log ]; then
+              echo "--- archive merge (last 40 lines) ---"
+              tail -n 40 build/libtool.log
             fi
             if [ -f build/xcodebuild.log ]; then
               echo "--- xcodebuild (last 120 lines) ---"
-              tail -n 120 build/xcodebuild.log || true
+              tail -n 120 build/xcodebuild.log
+            fi
+            if [ ! -f build/core-build.log ] && [ ! -f build/xcodebuild.log ]; then
+              echo "--- no build log was produced ---"
+              ls -la build 2>/dev/null || echo "(no build directory)"
             fi
             echo '```'
           } > ci/failure.txt

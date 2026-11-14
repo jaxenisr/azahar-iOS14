@@ -52,7 +52,6 @@ cmake --build "$BUILD" --target citra_libretro --config Release -j "$(sysctl -n 
 # level; gather them by target instead of by a fixed path.
 echo "Collecting objects and archives ..."
 LIST="$(mktemp)"
-OBJDIRS="$(find "$BUILD" -type d -name 'CMakeFiles' -path '*citra_libretro*' -prune -print 2>/dev/null || true)"
 {
     find "$BUILD" -path '*CMakeFiles/citra_libretro*.dir/*' -name '*.o' -print
     # Static archives from Azahar and its dependencies, minus the libretro ones:
@@ -67,24 +66,26 @@ OBJDIRS="$(find "$BUILD" -type d -name 'CMakeFiles' -path '*citra_libretro*' -pr
 
 count="$(wc -l < "$LIST" | tr -d ' ')"
 echo "Merging $count inputs into $OUT/libazahar_core.a"
-echo "libretro object dirs found: ${OBJDIRS:-none}"
 
 if ! grep -q 'citra_libretro\.cpp\.o$' "$LIST"; then
     echo "error: the libretro entry point object was not collected" >&2
-    echo "objects seen under the libretro targets:" >&2
-    grep -i 'citra_libretro' "$LIST" | head -20 >&2 || echo "  (none)" >&2
+    find "$BUILD" -path '*citra_libretro*' -name '*.o' | head -20 >&2 || true
     exit 1
 fi
 
 rm -f "$OUT/libazahar_core.a"
-libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST") 2>&1 | tail -5 || {
-    echo "error: libtool failed to merge objects; see above" >&2
+LIBTOOL_LOG="$ROOT/build/libtool.log"
+if ! libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST") > "$LIBTOOL_LOG" 2>&1; then
+    echo "error: libtool failed to merge objects" >&2
+    tail -20 "$LIBTOOL_LOG" >&2
     exit 1
-}
+fi
+tail -5 "$LIBTOOL_LOG" || true
 
 if ! nm -g "$OUT/libazahar_core.a" 2>/dev/null | grep -q ' _retro_init$'; then
     echo "error: merged archive does not export retro_init" >&2
-    echo "global text symbols in the archive (sample):" >&2
+    echo "members: $(ar -t "$OUT/libazahar_core.a" 2>/dev/null | wc -l | tr -d ' ')" >&2
+    echo "global text symbols (sample):" >&2
     nm -g "$OUT/libazahar_core.a" 2>/dev/null | grep ' T ' | head -20 >&2 || echo "  (none)" >&2
     exit 1
 fi
