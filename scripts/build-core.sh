@@ -7,6 +7,10 @@
 # their build files we let it compile with their own flags and then merge the
 # resulting objects and static dependencies into a single archive. vendor/azahar
 # stays byte-identical to the release tag.
+#
+# MoltenVK stays a separate archive. libtool folds an input archive in as a
+# single member when it is handed one, and the linker cannot resolve symbols out
+# of a nested archive, so the app links it directly with -lMoltenVK.
 
 set -euo pipefail
 
@@ -65,39 +69,12 @@ LIST="$(mktemp)"
         -not -path '*CMakeFiles/CMakeFiles*' -print
 } | sort -u > "$LIST"
 
-# MoltenVK. Azahar does not build or link it for libretro targets, so the
-# frontend supplies it: scripts/fetch-azahar.sh leaves the ios-arm64 static slice
-# in vendor/moltenvk. Its objects are extracted and merged individually because
-# handing libtool the archive itself folds it in as one member, which the linker
-# then cannot resolve symbols from.
-MVK_DIR=""
-if ! grep -q 'libMoltenVK\.a' "$LIST"; then
-    MOLTENVK="$(find "$ROOT/vendor" -path '*ios-arm64*' -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
-    if [ -z "$MOLTENVK" ]; then
-        MOLTENVK="$(find "$ROOT/vendor" -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
-    fi
-    if [ -z "$MOLTENVK" ]; then
-        echo "error: libMoltenVK.a not found; Vulkan would fail to link" >&2
-        exit 1
-    fi
-    echo "MoltenVK: $MOLTENVK"
-    MVK_DIR="$(mktemp -d)"
-    ( cd "$MVK_DIR" && ar -x "$MOLTENVK" )
-    if ! nm -g "$MVK_DIR"/*.o 2>/dev/null | grep -q ' T _vkCreateInstance'; then
-        echo "error: $MOLTENVK does not define vkCreateInstance" >&2
-        rm -rf "$MVK_DIR"
-        exit 1
-    fi
-    find "$MVK_DIR" -name '*.o' -print >> "$LIST"
-fi
-
 count="$(wc -l < "$LIST" | tr -d ' ')"
 echo "Merging $count inputs into $OUT/libazahar_core.a"
 
 if ! grep -q "/${ENTRY}\$" "$LIST"; then
     echo "error: the libretro entry point object was not collected" >&2
     grep -i 'citra_libretro' "$LIST" | head -20 >&2 || true
-    rm -rf "$MVK_DIR"
     exit 1
 fi
 
@@ -106,11 +83,31 @@ LIBTOOL_LOG="$ROOT/build/libtool.log"
 if ! libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST") > "$LIBTOOL_LOG" 2>&1; then
     echo "error: libtool failed to merge objects" >&2
     tail -20 "$LIBTOOL_LOG" >&2
-    rm -rf "$MVK_DIR"
     exit 1
 fi
 tail -5 "$LIBTOOL_LOG" || true
 echo "members: $(ar -t "$OUT/libazahar_core.a" | wc -l | tr -d ' ')"
+
+# MoltenVK. Azahar links it only for its own Qt/SDL builds, not for libretro
+# targets, so the frontend supplies the Vulkan implementation.
+MOLTENVK="$(find "$ROOT/vendor" -path '*ios-arm64*' -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
+if [ -z "$MOLTENVK" ]; then
+    MOLTENVK="$(find "$ROOT/vendor" -name 'libMoltenVK.a' -print 2>/dev/null | sort | head -1 || true)"
+fi
+if [ -z "$MOLTENVK" ]; then
+    echo "error: libMoltenVK.a not found; Vulkan would fail to link" >&2
+    exit 1
+fi
+cp "$MOLTENVK" "$OUT/libMoltenVK.a"
+echo "MoltenVK: $OUT/libMoltenVK.a"
+
+# nm output for Mach-O is not always available in this container, and the app's
+# link step is the real test; this only catches an obviously wrong file.
+if ! { nm -g "$OUT/libMoltenVK.a" 2>/dev/null || strings -a "$OUT/libMoltenVK.a"; } \
+    | grep -q 'vkCreateInstance'; then
+    echo "error: $OUT/libMoltenVK.a does not mention vkCreateInstance" >&2
+    exit 1
+fi
 
 # Verify the libretro entry point in its own member. Scanning the whole archive is
 # unreliable at this size: nm stops partway through the members and reports
@@ -118,20 +115,17 @@ echo "members: $(ar -t "$OUT/libazahar_core.a" | wc -l | tr -d ' ')"
 VERIFY="$(mktemp -d)"
 if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$ENTRY" ); then
     echo "error: $ENTRY is missing from the merged archive" >&2
-    rm -rf "$VERIFY" "$MVK_DIR"
+    rm -rf "$VERIFY"
     exit 1
 fi
 
 if ! nm -g "$VERIFY/$ENTRY" | grep -q '_retro_init'; then
     echo "error: $ENTRY does not export retro_init" >&2
     nm -g "$VERIFY/$ENTRY" | head -40 >&2 || true
-    rm -rf "$VERIFY" "$MVK_DIR"
+    rm -rf "$VERIFY"
     exit 1
 fi
 rm -rf "$VERIFY"
-if [ -n "$MVK_DIR" ]; then
-    rm -rf "$MVK_DIR"
-fi
 
-ls -lh "$OUT/libazahar_core.a"
+ls -lh "$OUT"/*.a
 echo "Core archive ready."

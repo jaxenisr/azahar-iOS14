@@ -66,13 +66,16 @@ targets:
         TARGETED_DEVICE_FAMILY: "2"
         SWIFT_OBJC_BRIDGING_HEADER: App/Bridge/AzaharIPad-Bridging-Header.h
         # libazahar_core.a is produced by scripts/build-core.sh: every object of
-        # Azahar's libretro core plus its static dependencies and MoltenVK.
+        # Azahar's libretro core plus its static dependencies. libMoltenVK.a sits
+        # beside it and is linked separately, because the core does not build or
+        # link MoltenVK for libretro targets.
         OTHER_LDFLAGS:
           - $(inherited)
           - -Xlinker
           - -no_fixup_chains
           - -L$(SRCROOT)/vendor-out
           - -lazahar_core
+          - -lMoltenVK
           - -lc++
       configs:
         Debug:
