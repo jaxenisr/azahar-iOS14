@@ -63,4 +63,18 @@ FOUNDATION_EXPORT void AZCoreSetCirclePad(int x, int y);
 /// Most recent message the core wanted to show, or nil.
 FOUNDATION_EXPORT NSString *_Nullable AZCoreLastMessage(void);
 
+/// The CAMetalLayer the Vulkan renderer presents into. Set before loading content.
+FOUNDATION_EXPORT void AZCoreSetMetalLayer(void *_Nullable layer);
+
+/// YES asks for the Vulkan hardware renderer (the default); NO pins the core's
+/// software rasteriser, which is only useful when isolating a GPU problem.
+FOUNDATION_EXPORT void AZCoreSetRendererPreference(BOOL preferVulkan);
+
+/// What is actually rendering: the Vulkan device name, or the software path and
+/// the reason it was chosen. Valid after a load attempt.
+FOUNDATION_EXPORT const char *AZCoreRendererName(void);
+
+/// YES when frames are arriving from the GPU rather than as CPU bitmaps.
+FOUNDATION_EXPORT BOOL AZCoreUsesHardwareVideo(void);
+
 NS_ASSUME_NONNULL_END
