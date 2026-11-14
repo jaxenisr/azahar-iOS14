@@ -104,11 +104,14 @@ jobs:
           mkdir -p build
           bash scripts/package-ipa.sh 2>&1 | tee build/package.log
 
+      # The log travels with the IPA so every build carries its own verification.
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Azahar-ipa
-          path: Azahar.ipa
+          path: |
+            Azahar.ipa
+            build/package.log
           if-no-files-found: error
 
       # Release publishing is gated on a token that belongs to the repository

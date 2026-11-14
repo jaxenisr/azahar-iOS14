@@ -13,15 +13,18 @@ frontend. See [docs/azahar.md](docs/azahar.md).
 
 | Milestone step | State |
 |---|---|
-| iOS 14-safe build pipeline (section 7 gates in CI) | in place, unverified until the first CI run |
-| Pinned Azahar core compiled for iOS 14 arm64 and statically linked | wired, unverified |
-| Core smoke test (`retro_init` / `retro_get_system_info` on device) | wired, unverified |
-| Import `.3ds` / `.cci` / `.zcci`, tile with real title and icon | implemented |
+| iOS 14-safe build pipeline (section 7 gates in CI) | **green**: builds, ad-hoc signs and verifies the IPA |
+| Pinned Azahar core compiled for iOS 14 arm64 and statically linked | **green**: app and core both minos 14.0, arm64 only, no chained fixups |
+| Core smoke test (`retro_init` / `retro_get_system_info` on device) | wired, **not yet run on the iPad** |
+| Import `.3ds` / `.cci`, tile with real title and icon | implemented, **not yet exercised on device** |
 | Launch, on-screen + MFi controls, save state, quit | **not yet** |
 
 The core is deliberately proven on the device before the emulation loop is added:
 the previous attempt on this iPad died 0.36 s into launch, before any UI, and the
 cheapest way to avoid repeating that is a build that boots first.
+
+The IPA is attached to the workflow run and carries `package.log`, the verification
+gate's own output for that build.
 
 ## Build contract
 
@@ -32,9 +35,13 @@ Every item here is mandatory and enforced in CI, not by convention.
   by default; iOS 14's dyld cannot bind them).
 - **arm64 only**; `arm64e` excluded, and the packaging step fails if any binary
   carries another slice.
-- No bundled `.dylib` or `.framework`. Swift comes from the OS (iOS 12.2+), so
-  nothing is embedded - embedding a runtime is how a newer minimum OS gets in.
-- Ad-hoc signing last (`codesign --force --sign -`), after packaging.
+- No bundled `.dylib` or `.framework`, with one exception: for targets below iOS 15
+  the toolchain embeds Apple's Swift-concurrency back-deployment library at
+  `Frameworks/libswift_Concurrency.dylib`. It is allowed only at that exact path,
+  because it is arm64 with a minimum OS far below 14.0 and so cannot raise the
+  launch floor; any other dylib or framework fails the build.
+- Ad-hoc signing last (`codesign --force --sign -`), after packaging, verified with
+  `--deep --strict` so nested code is covered.
 - `scripts/verify-binaries.sh` fails the build unless every Mach-O shows
   minos <= 14.0 (`otool -l`), no `LC_DYLD_CHAINED_FIXUPS` (`otool -l` and
   `dyld_info`), and an arm64-only slice (`lipo`).
@@ -44,17 +51,28 @@ a newer OS, that is a build problem.
 
 ## How it is built
 
-CI (`macos-15` runner, **Xcode 16.x**): Xcode 16 is used rather than Xcode 26
-because Apple's own Xcode 26 deployment-target range starts at iOS 15. The core is
-compiled with Azahar's own iOS flags at 14.0, then merged into a single static
-archive, because Azahar's build only produces a shared core and iOS cannot load
-dylibs.
+CI runs on `macos-15` with **two toolchains, deliberately**:
+
+- **the core is built with Xcode 26**, because Azahar's sources use `std::format`
+  and the iOS 18 SDK's libc++ routes its floating-point path through `std::to_chars`,
+  which Apple marks unavailable below iOS 16.3. Xcode 26's libc++ does not take that
+  path, and this is exactly how Azahar's own iOS job builds the same code at
+  deployment target 14.0.
+- **the app is built and linked with Xcode 16**, whose published deployment-target
+  range covers iOS 14. The final image is therefore produced by the conservative
+  toolchain.
+
+The core is compiled with Azahar's own iOS flags at 14.0, then merged into a single
+static archive, because Azahar's build only produces a shared core and iOS cannot
+load dylibs. The app icon is drawn by `scripts/make-icon.py` rather than stored, so
+the tree stays text-only.
 
 Locally, on a Mac:
 
 ```sh
 bash scripts/fetch-azahar.sh     # pinned tag into vendor/ (git-ignored)
 bash scripts/build-core.sh       # iOS 14 arm64 core -> vendor-out/libazahar_core.a
+python3 scripts/make-icon.py App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
 brew install xcodegen
 xcodegen generate
 xcodebuild -project AzaharIPad.xcodeproj -scheme AzaharIPad \
@@ -62,9 +80,9 @@ xcodebuild -project AzaharIPad.xcodeproj -scheme AzaharIPad \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-The IPA is produced by CI and attached to the workflow run; with a
-`RELEASE_PAT` repository secret it is also attached to a tagged release published
-under the repository owner's account, and without it nothing is published.
+With a `RELEASE_PAT` repository secret the IPA is also attached to a tagged release
+published under the repository owner's account; without it nothing is published and
+the artifact on the workflow run is the way to get the build.
 
 ## Using it on the device
 
@@ -72,10 +90,10 @@ ROMs go in the app's `Documents/ROMs` folder - drop them in through the Files ap
 (`UIFileSharingEnabled` is on) or use the import button. Files are copied into the
 app container on import.
 
-**System files are required.** No game boots without 3DS system files
-(shared font/sysdata and a NAND image); the core stops with `ErrorSystemFiles`
-before its first frame. Import them into the app's `Documents/Azahar` directory
-(the core's user directory). This is a boot prerequisite, not a feature.
+**System files are required.** No game boots without 3DS system files (shared
+font/sysdata and a NAND image); the core stops with `ErrorSystemFiles` before its
+first frame. Import them into the app's `Documents/Azahar` directory (the core's user
+directory). This is a boot prerequisite, not a feature.
 
 ## Performance, stated plainly
 
@@ -101,13 +119,14 @@ notes and the code paths above.
 
 ```
 App/            SwiftUI app and the Objective-C++ libretro bridge
-scripts/        fetch upstream, build the core, verify the packaged binaries
+scripts/        fetch upstream, build the core, draw the icon, package and verify
 docs/           upstream provenance, licence and source findings
 project.yml     XcodeGen definition (the Xcode project is generated, not committed)
 .github/        the macOS build/verify/release workflow
 ```
 
-`vendor/` and `vendor-out/` are build inputs, never committed.
+`vendor/`, `vendor-out/` and the generated icon are build inputs/outputs, never
+committed.
 
 ## Branches and releases
 
