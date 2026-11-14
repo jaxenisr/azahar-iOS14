@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Deliberately empty. Ad-hoc signing for TrollStore needs no entitlements,
+	  and nothing here asks for a capability the app does not use.
+	  Do not add private or platform entitlements: they change what the binary
+	  requires from the kernel and are a known source of launch failures.
+	-->
+</dict>
+</plist>

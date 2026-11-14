@@ -1,0 +1,106 @@
+# XcodeGen project definition.
+# Generate with: xcodegen generate
+#
+# Every deployment-critical setting here is deliberate; see README.md ("Build
+# contract") before changing any of it.
+
+name: AzaharIPad
+
+options:
+  bundleIdPrefix: com.jaxenisr
+  deploymentTarget:
+    iOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    # --- Section 7 build contract -------------------------------------------
+    IPHONEOS_DEPLOYMENT_TARGET: "14.0"
+    ARCHS: arm64
+    VALID_ARCHS: arm64
+    EXCLUDED_ARCHS: arm64e
+    ONLY_ACTIVE_ARCH: NO
+    # Xcode 13.3+ emits chained fixups by default; iOS 14 dyld cannot bind them.
+    OTHER_LDFLAGS:
+      - $(inherited)
+      - -Xlinker
+      - -no_fixup_chains
+    # Swift is in the OS on iOS 12.2+, so nothing is embedded (embedding is what
+    # drags a newer minimum OS into the bundle).
+    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: NO
+    SWIFT_VERSION: "5.0"
+    # --- Toolchain ----------------------------------------------------------
+    CLANG_CXX_LANGUAGE_STANDARD: c++20
+    CLANG_CXX_LIBRARY: libc++
+    GCC_ENABLE_CPP_EXCEPTIONS: YES
+    GCC_ENABLE_CPP_RTTI: YES
+    CLANG_ENABLE_MODULES: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    DEAD_CODE_STRIPPING: YES
+    STRIP_INSTALLED_PRODUCT: YES
+    SWIFT_OPTIMIZATION_LEVEL: -O
+    # --- Core headers -------------------------------------------------------
+    HEADER_SEARCH_PATHS:
+      - $(inherited)
+      - $(SRCROOT)/vendor/azahar/src
+      - $(SRCROOT)/vendor/azahar/externals/libretro-common/libretro-common/include
+    LIBRARY_SEARCH_PATHS:
+      - $(inherited)
+      - $(SRCROOT)/vendor-out
+
+targets:
+  AzaharIPad:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/Sources
+      - path: App/Bridge
+      - path: App/Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jaxenisr.azaharipad
+        PRODUCT_NAME: Azahar
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/Entitlements.plist
+        TARGETED_DEVICE_FAMILY: "2"
+        SWIFT_OBJC_BRIDGING_HEADER: App/Bridge/AzaharIPad-Bridging-Header.h
+        # libazahar_core.a is produced by scripts/build-core.sh: every object of
+        # Azahar's libretro core plus its static dependencies and MoltenVK.
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -Xlinker
+          - -no_fixup_chains
+          - -L$(SRCROOT)/vendor-out
+          - -lazahar_core
+          - -lc++
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: -Onone
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreGraphics.framework
+      - sdk: CoreFoundation.framework
+      - sdk: Foundation.framework
+      - sdk: UIKit.framework
+      - sdk: CoreAudio.framework
+      - sdk: AudioToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: GameController.framework
+      - sdk: UniformTypeIdentifiers.framework
+      - sdk: Security.framework
+      - sdk: CoreMotion.framework
+
+schemes:
+  AzaharIPad:
+    build:
+      targets:
+        AzaharIPad: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    archive:
+      config: Release
