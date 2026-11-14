@@ -14,32 +14,31 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AZ="$ROOT/vendor/azahar"
 BUILD="$ROOT/build/core"
 OUT="$ROOT/vendor-out"
+LOG="$ROOT/build/core-build.log"
 
 if [[ ! -d "$AZ" ]]; then
     echo "error: vendor/azahar missing; run scripts/fetch-azahar.sh first" >&2
     exit 1
 fi
 
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$ROOT/build"
+# Everything below is captured so the tail can be recorded if this fails.
+exec > >(tee "$LOG") 2>&1
 
-# Flags mirror Azahar's own iOS libretro CI job (which proves this compiles),
-# with the deployment target pinned to 14.0 as required by section 7.
+# Flags mirror Azahar's own iOS libretro CI job exactly (that job is the proof
+# this compiles), with the deployment target pinned to 14.0 per section 7.
 cmake -S "$AZ" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
     -DENABLE_LIBRETRO=ON \
     -DIOS=ON \
     -DCMAKE_SYSTEM_NAME=iOS \
-    -DCMAKE_OSX_SYSROOT=iphoneos \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_C_FLAGS=-DIOS \
     -DCMAKE_CXX_FLAGS=-DIOS \
     -DCITRA_USE_PRECOMPILED_HEADERS=OFF \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DENABLE_OPT=OFF \
-    -DENABLE_TESTS=OFF \
-    -DENABLE_QT=OFF \
-    -DENABLE_SDL2=OFF
+    -DENABLE_OPT=OFF
 
 cmake --build "$BUILD" --target citra_libretro --config Release -j "$(sysctl -n hw.ncpu)"
 
@@ -60,10 +59,10 @@ count="$(wc -l < "$LIST" | tr -d ' ')"
 echo "Merging $count inputs into $OUT/libazahar_core.a"
 
 rm -f "$OUT/libazahar_core.a"
-libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST") 2>&1 | tail -5 || {
-    echo "error: libtool failed to merge objects; see above" >&2
+if ! libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST"); then
+    echo "error: libtool failed to merge objects" >&2
     exit 1
-}
+fi
 
 if ! nm "$OUT/libazahar_core.a" 2>/dev/null | grep -q '_retro_init'; then
     echo "error: merged archive does not export retro_init" >&2
