@@ -293,7 +293,7 @@ bool environment_callback(unsigned cmd, void *data) {
     }
     case RETRO_ENVIRONMENT_SET_MESSAGE_EXT:
         return true;
-    case RETRO_ENVIRONMENT_DISPLAY_MESSAGE: {
+    case RETRO_ENVIRONMENT_SET_MESSAGE: {
         const auto *message = static_cast<const retro_message *>(data);
         record_message(message->msg);
         return true;
