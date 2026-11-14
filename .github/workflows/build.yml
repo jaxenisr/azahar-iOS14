@@ -75,6 +75,10 @@ jobs:
           sudo xcode-select -s "$APP_XCODE"
           xcodebuild -version
 
+      # The icon is drawn, not stored, so it has to exist before the catalog is read.
+      - name: Draw app icon
+        run: python3 scripts/make-icon.py App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+
       - name: Generate project
         run: xcodegen generate
 
