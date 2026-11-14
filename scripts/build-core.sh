@@ -14,42 +14,52 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AZ="$ROOT/vendor/azahar"
 BUILD="$ROOT/build/core"
 OUT="$ROOT/vendor-out"
-LOG="$ROOT/build/core-build.log"
 
 if [[ ! -d "$AZ" ]]; then
     echo "error: vendor/azahar missing; run scripts/fetch-azahar.sh first" >&2
     exit 1
 fi
 
-mkdir -p "$OUT" "$ROOT/build"
-# Everything below is captured so the tail can be recorded if this fails.
-exec > >(tee "$LOG") 2>&1
+mkdir -p "$OUT"
 
-# Flags mirror Azahar's own iOS libretro CI job exactly (that job is the proof
-# this compiles), with the deployment target pinned to 14.0 per section 7.
+# Flags mirror Azahar's own iOS libretro CI job (which proves this compiles),
+# with the deployment target pinned to 14.0 as required by section 7.
 cmake -S "$AZ" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
     -DENABLE_LIBRETRO=ON \
     -DIOS=ON \
     -DCMAKE_SYSTEM_NAME=iOS \
+    -DCMAKE_OSX_SYSROOT=iphoneos \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_C_FLAGS=-DIOS \
     -DCMAKE_CXX_FLAGS=-DIOS \
     -DCITRA_USE_PRECOMPILED_HEADERS=OFF \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DENABLE_OPT=OFF
+    -DENABLE_OPT=OFF \
+    -DENABLE_TESTS=OFF \
+    -DENABLE_QT=OFF \
+    -DENABLE_SDL2=OFF
 
 cmake --build "$BUILD" --target citra_libretro --config Release -j "$(sysctl -n hw.ncpu)"
 
-# Objects of the libretro entry point and its OBJECT library, plus every static
+# Objects of the libretro entry point and its object libraries, plus every static
 # archive Azahar and its dependency libraries produced (core, video_core,
 # audio_core, fmt, sirit, dds-ktx, MoltenVK, ...).
+#
+# The libretro targets live in a subdirectory, so their objects sit under
+# build/core/src/citra_libretro/CMakeFiles/<target>.dir/ rather than at the top
+# level; gather them by target instead of by a fixed path.
 echo "Collecting objects and archives ..."
 LIST="$(mktemp)"
+OBJDIRS="$(find "$BUILD" -type d -name 'CMakeFiles' -path '*citra_libretro*' -prune -print 2>/dev/null || true)"
 {
-    find "$BUILD/CMakeFiles" -path '*citra_libretro*.dir*' -name '*.o' -print
+    find "$BUILD" -path '*CMakeFiles/citra_libretro*.dir/*' -name '*.o' -print
+    # Static archives from Azahar and its dependencies, minus the libretro ones:
+    # that code is already present as the objects collected above, and merging
+    # both would duplicate members.
     find "$BUILD" -name '*.a' \
+        -not -name '*citra_libretro*' \
         -not -path '*CMakeFiles/CMakeScratch*' \
         -not -path '*CMakeFiles/CMakeTmp*' \
         -not -path '*CMakeFiles/CMakeFiles*' -print
@@ -57,15 +67,25 @@ LIST="$(mktemp)"
 
 count="$(wc -l < "$LIST" | tr -d ' ')"
 echo "Merging $count inputs into $OUT/libazahar_core.a"
+echo "libretro object dirs found: ${OBJDIRS:-none}"
 
-rm -f "$OUT/libazahar_core.a"
-if ! libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST"); then
-    echo "error: libtool failed to merge objects" >&2
+if ! grep -q 'citra_libretro\.cpp\.o$' "$LIST"; then
+    echo "error: the libretro entry point object was not collected" >&2
+    echo "objects seen under the libretro targets:" >&2
+    grep -i 'citra_libretro' "$LIST" | head -20 >&2 || echo "  (none)" >&2
     exit 1
 fi
 
-if ! nm "$OUT/libazahar_core.a" 2>/dev/null | grep -q '_retro_init'; then
+rm -f "$OUT/libazahar_core.a"
+libtool -static -o "$OUT/libazahar_core.a" $(cat "$LIST") 2>&1 | tail -5 || {
+    echo "error: libtool failed to merge objects; see above" >&2
+    exit 1
+}
+
+if ! nm -g "$OUT/libazahar_core.a" 2>/dev/null | grep -q ' _retro_init$'; then
     echo "error: merged archive does not export retro_init" >&2
+    echo "global text symbols in the archive (sample):" >&2
+    nm -g "$OUT/libazahar_core.a" 2>/dev/null | grep ' T ' | head -20 >&2 || echo "  (none)" >&2
     exit 1
 fi
 
