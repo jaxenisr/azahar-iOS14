@@ -161,6 +161,7 @@ struct GameDetailView: View {
     let game: GameEntry
     @EnvironmentObject private var library: GameLibrary
     @Environment(\.presentationMode) private var presentationMode
+    @State private var session: PlaybackSession?
 
     var body: some View {
         ZStack {
@@ -188,12 +189,22 @@ struct GameDetailView: View {
                     infoRow("Core", library.coreDescription)
                     infoRow("Core check", library.coreStatus)
 
-                    Text("Playback is not wired up yet: the core links and initialises, but the video, audio, input and save-state frontend lands in the next step.")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.45))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 28)
-                        .padding(.top, 6)
+                    Button(action: {
+                        session = PlaybackSession(game: game, coreDirectory: library.coreDirectory)
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "play.fill")
+                            Text("Play")
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: 220)
+                        .padding(.vertical, 12)
+                        .background(Capsule().fill(Color.white.opacity(0.16)))
+                    }
+                    .padding(.top, 4)
+
+                    requirements
 
                     Button(action: {
                         library.remove(game)
@@ -208,6 +219,44 @@ struct GameDetailView: View {
                 }
             }
         }
+        .fullScreenCover(item: $session) { session in
+            PlaybackScreen(session: session)
+        }
+    }
+
+    private var requirements: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Beyond the ROM")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.45))
+                Spacer()
+            }
+
+            ForEach(library.coreFileStatus()) { status in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: status.present ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 12))
+                        .foregroundColor(status.present ? Color.green.opacity(0.8) : Color.white.opacity(0.3))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(status.id)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.85))
+                        Text(status.note)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.45))
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+
+            Text("Azahar keeps its own user directory under Documents/Azahar. A decrypted dump boots with nothing else in it. Encrypted content needs sysdata/aes_keys.txt and, for seeded titles, sysdata/seeddb.bin; Mii data and system saves live under nand/, which the core creates itself. Whether this file is encrypted is decided by the core when it loads it: an encrypted dump is refused with \"This ROM is encrypted and must be decrypted before use with Azahar.\", and any missing archive is named on the playback screen.")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.45))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 6)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -274,5 +323,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
                             didPickDocumentsAt urls: [URL]) {
             onPick(urls)
         }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
     }
 }
