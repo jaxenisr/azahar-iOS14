@@ -6,6 +6,10 @@ import SwiftUI
 /// each used to draw their own cards: three different radii, four opacities of
 /// white for the same idea, and two side margins. Everything asks here now, so
 /// a card looks the same wherever it appears and nothing is off by a point.
+///
+/// This is the dark theme the app shipped with. It keeps every value it has while
+/// the design phases move screens to `Design` one at a time; the file is renamed
+/// from `Theme.swift` so the single file of that name is the new token set.
 enum Theme {
     // MARK: Base surfaces
 
