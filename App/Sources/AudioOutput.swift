@@ -229,9 +229,15 @@ final class AudioOutput {
 
         // Silent on purpose: a stopped engine should not leave the app holding
         // the session, and a refusal here is not worth reporting.
-        _ = AZTryCatch {
-            try? AVAudioSession.sharedInstance().setActive(false,
-                                                          options: .notifyOthersOnDeactivation)
+        _ = AZTryCatch { [self] in
+            do {
+                try AVAudioSession.sharedInstance().setActive(false,
+                                                              options: .notifyOthersOnDeactivation)
+            } catch {
+                self.lock.lock()
+                self.state = "stopped · session still held"
+                self.lock.unlock()
+            }
         }
     }
 
@@ -306,7 +312,11 @@ final class AudioOutput {
         // An interleaved format raises "required condition is false" from inside
         // AVFAudio as soon as the node is connected, which is what aborted the
         // app at launch before this was spelled out.
-        let audioFormat = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)
+        guard let audioFormat = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2) else {
+            disable(["name": "AVAudioFormat",
+                     "reason": "a \(Int(rate)) Hz stereo format could not be created"])
+            return
+        }
 
         let problem = AZTryCatch { [self] in
             engine.stop()
@@ -619,7 +629,13 @@ final class AudioOutput {
             buildEngine()
         } else {
             let problem = AZTryCatch { [self] in
-                try engine.start()
+                do {
+                    try engine.start()
+                } catch {
+                    lock.lock()
+                    startError = error.localizedDescription
+                    lock.unlock()
+                }
             }
             if let problem = problem {
                 disable(problem)

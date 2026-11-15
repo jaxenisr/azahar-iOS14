@@ -19,7 +19,6 @@ struct AudioDiagnosticsView: View {
 
     private struct SessionInfo {
         var category = "—"
-        var active = false
         var route = "—"
         var hardwareRate: Double = 0
         var channels = 0
@@ -57,7 +56,6 @@ struct AudioDiagnosticsView: View {
                             tint: counters.available ? Color.white.opacity(0.85) : .orange)
                         row("State", counters.state)
                         row("Category", sessionInfo.category)
-                        row("Active", sessionInfo.active ? "yes" : "no")
                         row("Route", sessionInfo.route)
                         row("Hardware", sessionInfo.hardwareRate > 0
                             ? String(format: "%.0f Hz · %.0f ch", sessionInfo.hardwareRate, Double(sessionInfo.channels))
@@ -183,7 +181,6 @@ struct AudioDiagnosticsView: View {
         let audioSession = AVAudioSession.sharedInstance()
         var info = SessionInfo()
         info.category = audioSession.category.rawValue
-        info.active = audioSession.isActive
         info.hardwareRate = audioSession.sampleRate
         if let output = audioSession.currentRoute.outputs.first {
             info.channels = output.channels?.count ?? 0
