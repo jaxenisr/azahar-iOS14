@@ -3,36 +3,6 @@ import SwiftUI
 import GameController
 import Combine
 
-/// Where the game image sits and where the controls sit, so the two can never
-/// overlap. The controls live in the margins the aspect-fit image leaves behind.
-struct ControlMetrics {
-    let game: CGRect
-    let landscape: Bool
-    let shoulderHeight: CGFloat
-
-    static func make(in size: CGSize, safeArea: UIEdgeInsets, scale: CGFloat) -> ControlMetrics {
-        let s = min(max(scale, 0.7), 1.35)
-        let shoulderHeight: CGFloat = 42
-        let landscape = size.width > size.height
-
-        if landscape {
-            let columnWidth = min(max(168 * s, 148), size.width * 0.24)
-            let game = CGRect(x: safeArea.left + columnWidth,
-                              y: safeArea.top + 4,
-                              width: max(size.width - safeArea.left - safeArea.right - columnWidth * 2, 120),
-                              height: max(size.height - safeArea.top - safeArea.bottom - 8, 120))
-            return ControlMetrics(game: game, landscape: true, shoulderHeight: shoulderHeight)
-        }
-
-        let bandHeight = min(max(206 * s, 186), size.height * 0.34)
-        let game = CGRect(x: safeArea.left,
-                          y: safeArea.top + shoulderHeight + 8,
-                          width: max(size.width - safeArea.left - safeArea.right, 120),
-                          height: max(size.height - safeArea.top - safeArea.bottom - bandHeight - shoulderHeight - 8, 120))
-        return ControlMetrics(game: game, landscape: false, shoulderHeight: shoulderHeight)
-    }
-}
-
 /// Soft, restrained haptics. Every call is a no-op when the setting is off.
 final class Haptics {
     private let light = UIImpactFeedbackGenerator(style: .light)
@@ -74,28 +44,31 @@ final class PadButtonView: UIControl {
     private let shape: Shape
     private let fill = UIView()
     private let label = UILabel()
-    private let diameter: CGFloat
     private var activeTouch: UITouch?
 
     var onPress: ((Bool) -> Void)?
     var onHaptic: (() -> Void)?
 
-    init(title: String, diameter: CGFloat, shape: Shape) {
-        self.diameter = diameter
+    init(title: String, shape: Shape) {
         self.shape = shape
         super.init(frame: .zero)
         isMultipleTouchEnabled = false
         isExclusiveTouch = false
+        backgroundColor = .clear
 
         fill.isUserInteractionEnabled = false
-        fill.backgroundColor = UIColor(white: 1, alpha: 0.075)
+        fill.backgroundColor = UIColor(white: 1, alpha: 0.1)
         fill.layer.borderWidth = 1
-        fill.layer.borderColor = UIColor(white: 1, alpha: 0.13).cgColor
+        fill.layer.borderColor = UIColor(white: 1, alpha: 0.16).cgColor
+        fill.layer.shadowColor = UIColor.black.cgColor
+        fill.layer.shadowOpacity = 0.45
+        fill.layer.shadowRadius = 8
+        fill.layer.shadowOffset = CGSize(width: 0, height: 4)
         addSubview(fill)
 
         label.text = title
-        label.font = .systemFont(ofSize: diameter * 0.34, weight: .semibold)
-        label.textColor = UIColor(white: 1, alpha: 0.9)
+        label.adjustsFontSizeToFitWidth = true
+        label.textColor = UIColor(white: 1, alpha: 0.86)
         label.textAlignment = .center
         label.isUserInteractionEnabled = false
         addSubview(label)
@@ -114,13 +87,21 @@ final class PadButtonView: UIControl {
         case .pill:
             fill.layer.cornerRadius = min(bounds.height / 2, 18)
         }
-        label.frame = bounds
+        label.frame = bounds.insetBy(dx: 4, dy: 2)
+        label.font = .systemFont(ofSize: max(min(bounds.height * 0.34, 20), 9), weight: .semibold)
     }
 
     override var isHighlighted: Bool {
         didSet {
-            UIView.animate(withDuration: 0.09) {
-                self.fill.backgroundColor = UIColor(white: 1, alpha: self.isHighlighted ? 0.22 : 0.075)
+            UIView.animate(withDuration: 0.12,
+                           delay: 0,
+                           options: [.allowUserInteraction, .beginFromCurrentState]) {
+                self.fill.backgroundColor = self.isHighlighted
+                    ? UIColor(white: 1, alpha: 0.26)
+                    : UIColor(white: 1, alpha: 0.1)
+                self.transform = self.isHighlighted
+                    ? CGAffineTransform(scaleX: 0.95, y: 0.95)
+                    : .identity
             }
         }
     }
@@ -135,7 +116,7 @@ final class PadButtonView: UIControl {
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = activeTouch, touches.contains(touch) else { return }
-        let inside = bounds.insetBy(dx: -14, dy: -14).contains(touch.location(in: self))
+        let inside = bounds.insetBy(dx: -18, dy: -18).contains(touch.location(in: self))
         if inside != isHighlighted {
             isHighlighted = inside
         }
@@ -156,8 +137,9 @@ final class PadButtonView: UIControl {
         onPress?(false)
     }
 
+    /// A generous target: the drawn circle is the visual, not the edge of the tap.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        bounds.insetBy(dx: -6, dy: -6).contains(point)
+        bounds.insetBy(dx: -10, dy: -10).contains(point)
     }
 }
 
@@ -176,20 +158,22 @@ final class ThumbstickView: UIControl {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        backgroundColor = .clear
+
         base.isUserInteractionEnabled = false
-        base.backgroundColor = UIColor(white: 1, alpha: 0.055)
+        base.backgroundColor = UIColor(white: 1, alpha: 0.07)
         base.layer.borderWidth = 1
-        base.layer.borderColor = UIColor(white: 1, alpha: 0.10).cgColor
+        base.layer.borderColor = UIColor(white: 1, alpha: 0.13).cgColor
         addSubview(base)
 
         knob.isUserInteractionEnabled = false
-        knob.backgroundColor = UIColor(white: 1, alpha: 0.16)
+        knob.backgroundColor = UIColor(white: 1, alpha: 0.18)
         knob.layer.borderWidth = 1
-        knob.layer.borderColor = UIColor(white: 1, alpha: 0.20).cgColor
+        knob.layer.borderColor = UIColor(white: 1, alpha: 0.22).cgColor
         knob.layer.shadowColor = UIColor.black.cgColor
-        knob.layer.shadowOpacity = 0.35
-        knob.layer.shadowRadius = 6
-        knob.layer.shadowOffset = CGSize(width: 0, height: 3)
+        knob.layer.shadowOpacity = 0.4
+        knob.layer.shadowRadius = 8
+        knob.layer.shadowOffset = CGSize(width: 0, height: 4)
         addSubview(knob)
     }
 
@@ -278,20 +262,28 @@ final class ThumbstickView: UIControl {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        bounds.insetBy(dx: -8, dy: -8).contains(point)
+        bounds.insetBy(dx: -10, dy: -10).contains(point)
     }
 }
 
 /// The whole control surface. It only answers touches that land on a control, so
 /// a finger on the game image still reaches the touchscreen underneath.
+///
+/// The frames arrive ready-made from `PlaybackGeometry`: this view draws and
+/// reports, it does not decide where anything goes.
 final class OnScreenControlsView: UIView {
     struct Setup {
         var opacity: CGFloat = 0.9
-        var scale: CGFloat = 1
         var haptics = true
-        var landscape = true
-        var game = CGRect.zero
-        var safeArea = UIEdgeInsets.zero
+        var button: CGFloat = 52
+        var offset: CGFloat = 48
+        var stick = CGRect.zero
+        var dpad = CGRect.zero
+        var diamond = CGRect.zero
+        var shoulderL = CGRect.zero
+        var shoulderR = CGRect.zero
+        var start = CGRect.zero
+        var select = CGRect.zero
     }
 
     var onButton: ((UInt32, Bool) -> Void)?
@@ -301,18 +293,24 @@ final class OnScreenControlsView: UIView {
     private var setup = Setup()
 
     private let stick = ThumbstickView(frame: .zero)
-    private let leftUp = PadButtonView(title: "▲", diameter: 54, shape: .circle)
-    private let leftDown = PadButtonView(title: "▼", diameter: 54, shape: .circle)
-    private let leftLeft = PadButtonView(title: "◀", diameter: 54, shape: .circle)
-    private let leftRight = PadButtonView(title: "▶", diameter: 54, shape: .circle)
-    private let buttonA = PadButtonView(title: "A", diameter: 58, shape: .circle)
-    private let buttonB = PadButtonView(title: "B", diameter: 58, shape: .circle)
-    private let buttonX = PadButtonView(title: "X", diameter: 58, shape: .circle)
-    private let buttonY = PadButtonView(title: "Y", diameter: 58, shape: .circle)
-    private let shoulderL = PadButtonView(title: "L", diameter: 40, shape: .pill)
-    private let shoulderR = PadButtonView(title: "R", diameter: 40, shape: .pill)
-    private let start = PadButtonView(title: "Start", diameter: 40, shape: .pill)
-    private let select = PadButtonView(title: "Select", diameter: 40, shape: .pill)
+    private let leftUp = PadButtonView(title: "▲", shape: .circle)
+    private let leftDown = PadButtonView(title: "▼", shape: .circle)
+    private let leftLeft = PadButtonView(title: "◀", shape: .circle)
+    private let leftRight = PadButtonView(title: "▶", shape: .circle)
+    private let buttonA = PadButtonView(title: "A", shape: .circle)
+    private let buttonB = PadButtonView(title: "B", shape: .circle)
+    private let buttonX = PadButtonView(title: "X", shape: .circle)
+    private let buttonY = PadButtonView(title: "Y", shape: .circle)
+    private let shoulderL = PadButtonView(title: "L", shape: .pill)
+    private let shoulderR = PadButtonView(title: "R", shape: .pill)
+    private let start = PadButtonView(title: "Start", shape: .pill)
+    private let select = PadButtonView(title: "Select", shape: .pill)
+
+    private var allButtons: [PadButtonView] {
+        [leftUp, leftDown, leftLeft, leftRight,
+         buttonA, buttonB, buttonX, buttonY,
+         shoulderL, shoulderR, start, select]
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -320,9 +318,7 @@ final class OnScreenControlsView: UIView {
         isMultipleTouchEnabled = true
 
         addSubview(stick)
-        for view in [leftUp, leftDown, leftLeft, leftRight,
-                     buttonA, buttonB, buttonX, buttonY,
-                     shoulderL, shoulderR, start, select] {
+        for view in allButtons {
             addSubview(view)
         }
 
@@ -372,126 +368,48 @@ final class OnScreenControlsView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let safe = setup.safeArea
-        let game = setup.game
-        guard game.width > 1, game.height > 1 else { return }
 
-        let s = min(max(setup.scale, 0.7), 1.35)
-        let buttonSize = min(max(48 * s, 44), 64)
-        let stickSize = min(max(150 * s, 132), 186)
+        stick.frame = setup.stick
+        shoulderL.frame = setup.shoulderL
+        shoulderR.frame = setup.shoulderR
+        start.frame = setup.start
+        select.frame = setup.select
 
-        if setup.landscape {
-            let columnWidth = game.minX - safe.left
-            let rightColumnWidth = bounds.width - safe.right - game.maxX
-            let leftCenterX = safe.left + columnWidth / 2
-            let rightCenterX = game.maxX + rightColumnWidth / 2
-            let shoulderY = safe.top + 4
+        let face = max(setup.button, 30)
+        let distance = max(setup.offset, face)
 
-            shoulderL.frame = CGRect(x: safe.left + 8, y: shoulderY,
-                                     width: min(columnWidth - 16, 96), height: 38)
-            shoulderR.frame = CGRect(x: bounds.width - safe.right - min(rightColumnWidth - 16, 96),
-                                     y: shoulderY,
-                                     width: min(rightColumnWidth - 16, 96), height: 38)
+        // The D-pad's four buttons are drawn to fill its own square, so the two
+        // arms meet instead of leaving holes between them.
+        let cross = setup.dpad
+        let d = max(min(cross.width / 3 - 2, 58), 26)
+        let dc = CGPoint(x: cross.midX, y: cross.midY)
+        leftUp.frame = CGRect(x: dc.x - d / 2, y: cross.minY, width: d, height: d)
+        leftDown.frame = CGRect(x: dc.x - d / 2, y: cross.maxY - d, width: d, height: d)
+        leftLeft.frame = CGRect(x: cross.minX, y: dc.y - d / 2, width: d, height: d)
+        leftRight.frame = CGRect(x: cross.maxX - d, y: dc.y - d / 2, width: d, height: d)
 
-            let stickTop = shoulderY + 52
-            let stickSide = min(stickSize, columnWidth - 24)
-            stick.frame = CGRect(x: leftCenterX - stickSide / 2, y: stickTop,
-                                 width: stickSide, height: stickSide)
+        // The 3DS diamond: X above, B below, Y left, A right.
+        let centre = CGPoint(x: setup.diamond.midX, y: setup.diamond.midY)
+        buttonX.frame = CGRect(x: centre.x - face / 2, y: centre.y - distance - face / 2,
+                              width: face, height: face)
+        buttonB.frame = CGRect(x: centre.x - face / 2, y: centre.y + distance - face / 2,
+                              width: face, height: face)
+        buttonY.frame = CGRect(x: centre.x - distance - face / 2, y: centre.y - face / 2,
+                              width: face, height: face)
+        buttonA.frame = CGRect(x: centre.x + distance - face / 2, y: centre.y - face / 2,
+                              width: face, height: face)
 
-            let crossSize = min(stickSide * 0.86, game.height - stickSide - 90)
-            let crossY = stick.frame.maxY + 16
-            layoutCross(centerX: leftCenterX, top: crossY, size: crossSize, button: buttonSize)
-
-            let diamondCenter = CGPoint(x: rightCenterX, y: game.midY - 10)
-            layoutDiamond(center: diamondCenter, button: buttonSize)
-
-            let startWidth = min(rightColumnWidth - 16, 96)
-            start.frame = CGRect(x: rightCenterX - startWidth / 2,
-                                 y: diamondCenter.y + buttonSize * 1.9,
-                                 width: startWidth, height: 36)
-            select.frame = CGRect(x: rightCenterX - startWidth / 2,
-                                  y: start.frame.maxY + 10,
-                                  width: startWidth, height: 36)
-        } else {
-            let bandTop = game.maxY
-            let bandHeight = bounds.height - safe.bottom - bandTop
-            let bandMidY = bandTop + bandHeight / 2
-
-            let shoulderWidth = min(bounds.width * 0.22, 116)
-            shoulderL.frame = CGRect(x: safe.left + 12, y: safe.top + 4,
-                                     width: shoulderWidth, height: 38)
-            shoulderR.frame = CGRect(x: bounds.width - safe.right - shoulderWidth - 12,
-                                     y: safe.top + 4,
-                                     width: shoulderWidth, height: 38)
-
-            let stickSide = min(stickSize, bandHeight - 24)
-            stick.frame = CGRect(x: safe.left + bandHeight * 0.1,
-                                 y: bandMidY - stickSide / 2,
-                                 width: stickSide, height: stickSide)
-
-            let crossSize = min(stickSide * 0.8, bandHeight - 40)
-            layoutCross(centerX: stick.frame.maxX + crossSize / 2 + 18,
-                        top: bandMidY - crossSize / 2 - 14,
-                        size: crossSize,
-                        button: min(buttonSize * 0.9, 52))
-
-            let diamondCenter = CGPoint(x: bounds.width - safe.right - bandHeight * 0.55,
-                                        y: bandMidY - 8)
-            layoutDiamond(center: diamondCenter, button: min(buttonSize, 56))
-
-            let startWidth: CGFloat = 78
-            start.frame = CGRect(x: diamondCenter.x - startWidth - 6,
-                                 y: diamondCenter.y + buttonSize * 1.55,
-                                 width: startWidth, height: 32)
-            select.frame = CGRect(x: diamondCenter.x + 6,
-                                  y: diamondCenter.y + buttonSize * 1.55,
-                                  width: startWidth, height: 32)
-        }
-
-        for button in [leftUp, leftDown, leftLeft, leftRight,
-                       buttonA, buttonB, buttonX, buttonY,
-                       shoulderL, shoulderR, start, select] {
+        for button in allButtons {
             button.setNeedsLayout()
         }
     }
 
-    private func layoutCross(centerX: CGFloat, top: CGFloat, size: CGFloat, button: CGFloat) {
-        let side = max(size, button * 2.6)
-        let midY = top + side / 2
-        let gap: CGFloat = 2
-        leftUp.frame = CGRect(x: centerX - button / 2, y: top, width: button, height: button)
-        leftDown.frame = CGRect(x: centerX - button / 2,
-                                y: top + side - button,
-                                width: button, height: button)
-        leftLeft.frame = CGRect(x: centerX - side / 2,
-                                y: midY - button / 2,
-                                width: button, height: button)
-        leftRight.frame = CGRect(x: centerX + side / 2 - button,
-                                 y: midY - button / 2,
-                                 width: button, height: button)
-        // Keep the three rows from touching when the button is large.
-        if leftUp.frame.maxY + gap > leftLeft.frame.minY {
-            leftUp.frame.origin.y = leftLeft.frame.minY - gap - button
-        }
-    }
-
-    private func layoutDiamond(center: CGPoint, button: CGFloat) {
-        let offset = button * 0.92
-        buttonX.frame = CGRect(x: center.x - button / 2, y: center.y - offset - button / 2,
-                              width: button, height: button)
-        buttonB.frame = CGRect(x: center.x - button / 2, y: center.y + offset - button / 2,
-                              width: button, height: button)
-        buttonY.frame = CGRect(x: center.x - offset - button / 2, y: center.y - button / 2,
-                              width: button, height: button)
-        buttonA.frame = CGRect(x: center.x + offset - button / 2, y: center.y - button / 2,
-                              width: button, height: button)
-    }
-
-    /// Only the controls themselves take touches; everything else falls through to
-    /// the game surface, where the bottom screen is.
+    /// Only the controls themselves take touches, each with a generous margin;
+    /// everything else falls through to the game surface, where the bottom
+    /// screen is.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         for view in subviews where !view.isHidden && view.alpha > 0.05 {
-            if view.frame.contains(point) { return true }
+            if view.frame.insetBy(dx: -6, dy: -6).contains(point) { return true }
         }
         return false
     }
