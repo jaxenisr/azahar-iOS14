@@ -8,7 +8,7 @@ struct LibraryView: View {
     @State private var selected: GameEntry?
 
     private let columns = [
-        GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 22)
+        GridItem(.adaptive(minimum: 156, maximum: 208), spacing: 20)
     ]
 
     var body: some View {
@@ -38,7 +38,7 @@ struct LibraryView: View {
 
     private var backdrop: some View {
         ZStack {
-            Color(red: 0.04, green: 0.05, blue: 0.07).ignoresSafeArea()
+            Theme.background.ignoresSafeArea()
             if let icon = library.games.first?.icon {
                 Image(uiImage: icon)
                     .resizable()
@@ -53,30 +53,22 @@ struct LibraryView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Games")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundColor(.white)
-                Text(library.games.isEmpty
-                     ? "No titles yet"
-                     : "\(library.games.count) title\(library.games.count == 1 ? "" : "s")")
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.5))
-            }
-            Spacer()
+        ScreenHeader(title: "Games",
+                     subtitle: library.games.isEmpty
+                        ? "No titles yet"
+                        : "\(library.games.count) title\(library.games.count == 1 ? "" : "s")") {
             Button(action: { isImporting = true }) {
                 Image(systemName: "plus")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.primaryInk)
                     .frame(width: 44, height: 44)
-                    .background(Circle().fill(Color.white.opacity(0.12)))
+                    .background(Circle().fill(Theme.chipFill))
+                    .contentShape(Circle())
             }
+            .buttonStyle(CardButtonStyle(scale: 0.94))
             .accessibilityLabel("Import a game")
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 22)
-        .padding(.bottom, 16)
+        .padding(.bottom, 14)
     }
 
     @ViewBuilder
@@ -85,13 +77,13 @@ struct LibraryView: View {
             emptyState
         } else {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 22) {
+                LazyVGrid(columns: columns, spacing: 20) {
                     ForEach(library.games) { game in
                         GameTile(game: game) { selected = game }
                     }
                 }
-                .padding(.horizontal, 26)
-                .padding(.bottom, 100)
+                .padding(.horizontal, Theme.sideMargin)
+                .padding(.bottom, Theme.bottomClearance)
             }
         }
     }
@@ -106,9 +98,9 @@ struct LibraryView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.white.opacity(0.8))
             Text("Files are copied into the app's Documents/ROMs folder.\n3DS system files go in Documents/Azahar.")
-                .font(.system(size: 13))
+                .font(Theme.detail)
                 .multilineTextAlignment(.center)
-                .foregroundColor(.white.opacity(0.45))
+                .foregroundColor(Theme.tertiaryInk)
                 .padding(.horizontal, 40)
             Spacer()
             Spacer()
@@ -124,8 +116,8 @@ struct GameTile: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 9) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(Color.white.opacity(0.06))
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                        .fill(Theme.cardFill)
                     if let icon = game.icon {
                         Image(uiImage: icon)
                             .resizable()
@@ -140,21 +132,24 @@ struct GameTile: View {
                 }
                 .aspectRatio(1, contentMode: .fit)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                        .stroke(Theme.cardStroke, lineWidth: 1)
+                        .allowsHitTesting(false)
                 )
+                .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
 
                 Text(game.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.92))
+                    .font(Theme.rowTitle)
+                    .foregroundColor(Color.white.opacity(0.92))
                     .lineLimit(1)
                 Text(game.subtitle)
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.45))
+                    .font(Theme.detail)
+                    .foregroundColor(Theme.tertiaryInk)
                     .lineLimit(1)
             }
+            .contentShape(Rectangle())
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(CardButtonStyle(scale: 0.97))
     }
 }
 
@@ -170,9 +165,9 @@ struct GameDetailView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.05, green: 0.06, blue: 0.08).ignoresSafeArea()
+            Theme.backgroundSpotlight.ignoresSafeArea()
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: Theme.cardSpacing) {
                     hero
                     playButton
 
@@ -213,12 +208,12 @@ struct GameDetailView: View {
                         if store.hasOverride(for: game.id) {
                             Button(action: { store.clearOverride(for: game.id) }) {
                                 Text("Reset to global")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(Theme.chipFont)
                                     .foregroundColor(.white.opacity(0.75))
                                     .padding(.horizontal, 14)
-                                    .frame(height: 32)
-                                    .background(Capsule().fill(Color.white.opacity(0.09)))
+                                    .chipSurface()
                             }
+                            .buttonStyle(CardButtonStyle(scale: 0.96))
                         }
                     }
 
@@ -269,14 +264,16 @@ struct GameDetailView: View {
                         presentationMode.wrappedValue.dismiss()
                     }) {
                         Text("Remove from library")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(Theme.rowTitle)
                             .foregroundColor(.red.opacity(0.9))
                             .padding(.vertical, 6)
+                            .contentShape(Rectangle())
                     }
-                    .padding(.bottom, 30)
+                    .buttonStyle(CardButtonStyle(scale: 0.98))
+                    .padding(.bottom, 60)
                 }
-                .padding(.horizontal, 26)
-                .padding(.top, 26)
+                .padding(.horizontal, Theme.sideMargin)
+                .padding(.top, 24)
             }
         }
         .fullScreenCover(item: $session) { session in
@@ -291,7 +288,7 @@ struct GameDetailView: View {
                     .resizable()
                     .interpolation(.high)
                     .frame(width: 116, height: 116)
-                    .cornerRadius(24)
+                    .cornerRadius(Theme.cardRadius)
                     .shadow(color: .black.opacity(0.4), radius: 18, y: 8)
             }
             Text(game.title)
@@ -318,12 +315,13 @@ struct GameDetailView: View {
                 Text("Play")
             }
             .font(.system(size: 16, weight: .semibold))
-            .foregroundColor(.black)
+            .foregroundColor(Theme.chipInk)
             .frame(maxWidth: .infinity)
             .frame(height: 52)
             .background(Capsule().fill(Color.white.opacity(0.92)))
+            .contentShape(Capsule())
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(CardButtonStyle(scale: 0.995, pressedOpacity: 0.85))
     }
 
     private func update(_ body: (inout SettingsStore.GameOverride) -> Void) {
@@ -362,14 +360,13 @@ struct MenuChip<Content: View>: View {
         } label: {
             HStack(spacing: 6) {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.chipFont)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9, weight: .bold))
             }
-            .foregroundColor(.white.opacity(0.85))
+            .foregroundColor(Theme.chipText)
             .padding(.horizontal, 12)
-            .frame(height: 32)
-            .background(Capsule().fill(Color.white.opacity(0.1)))
+            .chipSurface()
         }
     }
 }

@@ -41,10 +41,10 @@ struct AudioDiagnosticsView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.05, green: 0.06, blue: 0.08).ignoresSafeArea()
+            Theme.backgroundSpotlight.ignoresSafeArea()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
                     header
 
                     if !counters.available {
@@ -93,8 +93,8 @@ struct AudioDiagnosticsView: View {
                         hint("A refused graph is listed above with the exception name, and written to Documents/Azahar/log/frontend-crash.log.")
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 22)
+                .padding(.horizontal, Theme.sideMargin)
+                .padding(.top, 24)
                 .padding(.bottom, 40)
             }
         }
@@ -105,25 +105,24 @@ struct AudioDiagnosticsView: View {
     // MARK: - Pieces
 
     private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Audio diagnostics")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.white)
+                    .font(Theme.title)
+                    .foregroundColor(Theme.primaryInk)
                 Text("Live from the audio thread, twice a second")
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.45))
+                    .font(Theme.subtitle)
+                    .foregroundColor(Theme.secondaryInk)
             }
             Spacer(minLength: 12)
             Button(action: { presentationMode.wrappedValue.dismiss() }) {
                 Text("Done")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .font(Theme.chipFont)
+                    .foregroundColor(Theme.primaryInk)
                     .padding(.horizontal, 16)
-                    .frame(height: 34)
-                    .background(Capsule().fill(Color.white.opacity(0.12)))
+                    .chipSurface(height: 36)
             }
-            .buttonStyle(PlainButtonStyle())
+            .buttonStyle(CardButtonStyle(scale: 0.96))
         }
     }
 
@@ -153,10 +152,10 @@ struct AudioDiagnosticsView: View {
         HStack(alignment: .top, spacing: 12) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.white.opacity(0.45))
+                .foregroundColor(Theme.tertiaryInk)
                 .frame(width: 104, alignment: .leading)
             Text(value)
-                .font(.system(size: 11, design: .monospaced))
+                .font(Theme.monospacedSmall)
                 .foregroundColor(tint)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)

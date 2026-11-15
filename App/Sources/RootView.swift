@@ -47,7 +47,7 @@ struct RootView: View {
                 // the bar is the view that has to get it.
                 .zIndex(1)
         }
-        .background(Color(red: 0.04, green: 0.05, blue: 0.07).ignoresSafeArea())
+        .background(Theme.background.ignoresSafeArea())
     }
 }
 
@@ -111,23 +111,43 @@ struct TabButtonStyle: ButtonStyle {
     }
 }
 
-struct ScreenHeader: View {
+/// The title bar every screen shares: same size, same subtitle, same margins,
+/// and one slot for whatever that screen puts on the right.
+struct ScreenHeader<Accessory: View>: View {
     let title: String
     let subtitle: String
+    let accessory: Accessory
+
+    init(title: String, subtitle: String, @ViewBuilder accessory: () -> Accessory) {
+        self.title = title
+        self.subtitle = subtitle
+        self.accessory = accessory()
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.system(size: 34, weight: .bold))
-                .foregroundColor(.white)
-            Text(subtitle)
-                .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.5))
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(Theme.title)
+                    .foregroundColor(Theme.primaryInk)
+                Text(subtitle)
+                    .font(Theme.subtitle)
+                    .foregroundColor(Theme.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            accessory
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 26)
+        .padding(.horizontal, Theme.sideMargin)
         .padding(.top, 24)
-        .padding(.bottom, 4)
+        .padding(.bottom, 2)
+    }
+}
+
+extension ScreenHeader where Accessory == EmptyView {
+    init(title: String, subtitle: String) {
+        self.init(title: title, subtitle: subtitle) { EmptyView() }
     }
 }
 
@@ -143,21 +163,14 @@ struct SettingsCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.sectionTitle)
                 .kerning(0.8)
-                .foregroundColor(.white.opacity(0.42))
+                .foregroundColor(Theme.tertiaryInk)
             content
         }
-        .padding(18)
+        .padding(Theme.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.white.opacity(0.055))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
-        )
+        .cardSurface()
     }
 }
 
@@ -176,17 +189,19 @@ struct SettingRow<Control: View>: View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
+                    .font(Theme.rowTitle)
+                    .foregroundColor(Color.white.opacity(0.9))
                 if let subtitle = subtitle {
                     Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.42))
+                        .font(Theme.detail)
+                        .foregroundColor(Theme.tertiaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 8)
             control
         }
+        .frame(minHeight: Theme.rowHeight)
     }
 }
 
@@ -200,20 +215,15 @@ struct SegmentedRow: View {
             ForEach(options.indices, id: \.self) { index in
                 Button(action: { onSelect(index) }) {
                     Text(options[index])
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(selection == index ? .black : .white.opacity(0.72))
+                        .font(Theme.chipFont)
+                        .foregroundColor(selection == index ? Theme.chipInk : .white.opacity(0.72))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .padding(.horizontal, 8)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 34)
-                        .background(
-                            Capsule().fill(selection == index
-                                           ? Color.white.opacity(0.88)
-                                           : Color.white.opacity(0.08))
-                        )
+                        .chipSurface(selected: selection == index, height: 36)
                 }
-                .buttonStyle(PlainButtonStyle())
+                .buttonStyle(CardButtonStyle(scale: 0.95, pressedOpacity: 0.8))
             }
         }
     }
@@ -260,7 +270,7 @@ struct EmulationView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
                 ScreenHeader(title: "Emulation",
                              subtitle: "Defaults for every title. A title can override these from its own page.")
 
@@ -333,8 +343,8 @@ struct EmulationView: View {
                     }
                 }
             }
-            .padding(.horizontal, 26)
-            .padding(.bottom, 96)
+            .padding(.horizontal, Theme.sideMargin)
+            .padding(.bottom, Theme.bottomClearance)
         }
     }
 }
@@ -350,7 +360,7 @@ struct AppSettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
                 ScreenHeader(title: "Settings", subtitle: "System files, storage and the core")
 
                 SettingsCard("System files") {
@@ -382,12 +392,12 @@ struct AppSettingsView: View {
 
                     Button(action: { showsCacheAlert = true }) {
                         Text("Clear shader cache")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white)
+                            .font(Theme.chipFont)
+                            .foregroundColor(Theme.primaryInk)
                             .padding(.horizontal, 16)
-                            .frame(height: 36)
-                            .background(Capsule().fill(Color.white.opacity(0.12)))
+                            .chipSurface(height: 36)
                     }
+                    .buttonStyle(CardButtonStyle(scale: 0.96))
                     .padding(.top, 4)
                 }
 
@@ -405,8 +415,8 @@ struct AppSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.horizontal, 26)
-            .padding(.bottom, 96)
+            .padding(.horizontal, Theme.sideMargin)
+            .padding(.bottom, Theme.bottomClearance)
         }
         .onAppear(perform: refreshUsage)
         .alert(isPresented: $showsCacheAlert) {
@@ -427,7 +437,7 @@ struct AppSettingsView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .background(Capsule().fill(Color.black.opacity(0.8)))
-                        .padding(.bottom, 90)
+                        .padding(.bottom, 120)
                         .frame(maxHeight: .infinity, alignment: .bottom)
                         .onAppear {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -442,13 +452,14 @@ struct AppSettingsView: View {
     private func storageRow(_ title: String, _ bytes: Int64) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white.opacity(0.85))
+                .font(Theme.rowTitle)
+                .foregroundColor(Color.white.opacity(0.85))
             Spacer()
             Text(SettingsStore.StorageUsage.format(bytes))
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(.white.opacity(0.5))
+                .font(Theme.monospaced)
+                .foregroundColor(Theme.secondaryInk)
         }
+        .frame(minHeight: Theme.rowHeight)
     }
 
     private func refreshUsage() {
