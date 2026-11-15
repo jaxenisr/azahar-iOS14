@@ -111,6 +111,7 @@ struct TopNavigationBar: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(PressableStyle(scale: 0.96))
+                    .pressHaptic()
                     .accessibilityLabel(item.title)
                     .accessibilityAddTraits(selection == item ? [.isSelected] : [])
                 }
@@ -147,6 +148,7 @@ struct BottomNavigationBar: View {
                         .animation(Design.Motion.selection)
                     }
                     .buttonStyle(PressableStyle(scale: 0.97))
+                    .pressHaptic()
                     .accessibilityLabel(item.title)
                     .accessibilityAddTraits(selection == item ? [.isSelected] : [])
                 }
@@ -155,8 +157,9 @@ struct BottomNavigationBar: View {
     }
 }
 
-/// The title bar every screen shares: same size, same subtitle, same margins,
-/// and one slot for whatever that screen puts on the right.
+/// The title bar the library uses: same size, same subtitle, same margins, and
+/// one slot for the buttons on the right. The two settings pages collapse their
+/// title with `CollapsingTitle` instead, because their content scrolls past it.
 struct ScreenHeader<Accessory: View>: View {
     let title: String
     let subtitle: String
@@ -305,115 +308,131 @@ struct SettingsToggle: View {
 
 struct EmulationView: View {
     @ObservedObject private var store = SettingsStore.shared
+    @State private var scrollOffset: CGFloat = 0
 
     private var settings: EmulationSettings { store.global.emulation }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Design.Space.l) {
-                ScreenHeader(title: "Emulation",
-                             subtitle: "Defaults for every title. A title can override these from its own page.")
+        VStack(spacing: 0) {
+            CollapsingTitle(title: "Emulation",
+                            subtitle: "Defaults for every title. A title can override these from its own page.",
+                            offset: scrollOffset)
 
-                column {
-                    SettingsCard("Graphics", subtitle: "How the 3DS picture is drawn") {
-                        SettingRow("Resolution scale", subtitle: "Applied when playback starts") {
-                            SegmentedRow(options: ["1x", "2x", "3x", "4x"],
-                                         selection: settings.clampedResolution - 1) { index in
-                                store.updateGlobal { $0.resolutionScale = index + 1 }
-                            }
-                        }
-                        RowDivider()
-                        SettingRow("Screen layout", subtitle: "How the two screens are composed") {
-                            SegmentedRow(options: PlaybackLayout.allCases.map { $0.title },
-                                         selection: PlaybackLayout.allCases.firstIndex(of: settings.layout) ?? 0) { index in
-                                store.updateGlobal { $0.layout = PlaybackLayout.allCases[index] }
-                            }
-                        }
-                        RowDivider()
-                        PlaceholderRow(feature: .textureFilter)
-                    }
+            ScrollView {
+                VStack(alignment: .leading, spacing: Design.Space.l) {
+                    ScrollOffsetReader()
 
-                    SettingsCard("Performance", subtitle: "How fast the emulated machine runs") {
-                        SettingRow("Emulation speed",
-                                   subtitle: "How fast playback runs, against real time") {
-                            SegmentedRow(options: PlaybackSpeed.allCases.map { $0.title },
-                                         selection: PlaybackSpeed.allCases.firstIndex(of: settings.speed) ?? 2) { index in
-                                store.updateGlobal { $0.speed = PlaybackSpeed.allCases[index] }
+                    column {
+                        SettingsCard("Graphics", subtitle: "How the 3DS picture is drawn") {
+                            SettingRow("Resolution scale", subtitle: "Applied when playback starts") {
+                                SegmentedRow(options: ["1x", "2x", "3x", "4x"],
+                                             selection: settings.clampedResolution - 1) { index in
+                                    store.updateGlobal { $0.resolutionScale = index + 1 }
+                                }
                             }
-                        }
-                        RowDivider()
-                        SettingRow("3DS CPU clock",
-                                   subtitle: "How fast the emulated CPU runs. A separate setting: higher does not make playback faster, it makes the emulated machine faster") {
-                            SegmentedRow(options: EmulationSettings.cpuClockChoices.map { "\($0)%" },
-                                         selection: EmulationSettings.cpuClockChoices.firstIndex(of: settings.clampedClock) ?? 3) { index in
-                                store.updateGlobal { $0.cpuClockPercent = EmulationSettings.cpuClockChoices[index] }
+                            RowDivider()
+                            SettingRow("Screen layout", subtitle: "How the two screens are composed") {
+                                SegmentedRow(options: PlaybackLayout.allCases.map { $0.title },
+                                             selection: PlaybackLayout.allCases.firstIndex(of: settings.layout) ?? 0) { index in
+                                    store.updateGlobal { $0.layout = PlaybackLayout.allCases[index] }
+                                }
                             }
+                            RowDivider()
+                            PlaceholderRow(feature: .textureFilter)
                         }
-                        RowDivider()
-                        PlaceholderRow(feature: .new3DSMode)
-                    }
+                        .entrance(0)
 
-                    SettingsCard("Region",
-                                 subtitle: "Which market the emulated console reports. Some titles refuse to boot outside their own region.") {
-                        PlaceholderRow(feature: .regionOverride)
-                    }
+                        SettingsCard("Performance", subtitle: "How fast the emulated machine runs") {
+                            SettingRow("Emulation speed",
+                                       subtitle: "How fast playback runs, against real time") {
+                                SegmentedRow(options: PlaybackSpeed.allCases.map { $0.title },
+                                             selection: PlaybackSpeed.allCases.firstIndex(of: settings.speed) ?? 2) { index in
+                                    store.updateGlobal { $0.speed = PlaybackSpeed.allCases[index] }
+                                }
+                            }
+                            RowDivider()
+                            SettingRow("3DS CPU clock",
+                                       subtitle: "How fast the emulated CPU runs. A separate setting: higher does not make playback faster, it makes the emulated machine faster") {
+                                SegmentedRow(options: EmulationSettings.cpuClockChoices.map { "\($0)%" },
+                                             selection: EmulationSettings.cpuClockChoices.firstIndex(of: settings.clampedClock) ?? 3) { index in
+                                    store.updateGlobal { $0.cpuClockPercent = EmulationSettings.cpuClockChoices[index] }
+                                }
+                            }
+                            RowDivider()
+                            PlaceholderRow(feature: .new3DSMode)
+                        }
+                        .entrance(1)
 
-                    SettingsCard("Audio", subtitle: "Applies immediately, even mid-game") {
-                        SettingRow("Volume") {
-                            ValueSlider(value: settings.volume,
-                                        range: 0...1,
-                                        text: "\(Int(settings.volume * 100))%") { value in
-                                store.updateGlobal { $0.volume = value }
-                            }
+                        SettingsCard("Region",
+                                     subtitle: "Which market the emulated console reports. Some titles refuse to boot outside their own region.") {
+                            PlaceholderRow(feature: .regionOverride)
                         }
-                        RowDivider()
-                        SettingRow("Mute") {
-                            SettingsToggle(isOn: settings.isMuted) { value in
-                                store.updateGlobal { $0.isMuted = value }
-                            }
-                        }
-                    }
+                        .entrance(2)
 
-                    SettingsCard("Controls", subtitle: "Opacity and size apply to every layout") {
-                        SettingRow("Opacity") {
-                            ValueSlider(value: settings.clampedOpacity,
-                                        range: 0.25...1,
-                                        text: "\(Int(settings.clampedOpacity * 100))%") { value in
-                                store.updateGlobal { $0.controlsOpacity = value }
+                        SettingsCard("Audio", subtitle: "Applies immediately, even mid-game") {
+                            SettingRow("Volume") {
+                                ValueSlider(value: settings.volume,
+                                            range: 0...1,
+                                            text: "\(Int(settings.volume * 100))%") { value in
+                                    store.updateGlobal { $0.volume = value }
+                                }
+                            }
+                            RowDivider()
+                            SettingRow("Mute") {
+                                SettingsToggle(isOn: settings.isMuted) { value in
+                                    store.updateGlobal { $0.isMuted = value }
+                                }
                             }
                         }
-                        RowDivider()
-                        SettingRow("Size") {
-                            ValueSlider(value: settings.clampedScale,
-                                        range: 0.7...1.35,
-                                        text: "\(Int(settings.clampedScale * 100))%") { value in
-                                store.updateGlobal { $0.controlsScale = value }
-                            }
-                        }
-                        RowDivider()
-                        SettingRow("Haptics") {
-                            SettingsToggle(isOn: settings.hapticsEnabled) { value in
-                                store.updateGlobal { $0.hapticsEnabled = value }
-                            }
-                        }
-                    }
+                        .entrance(3)
 
-                    SettingsCard("Not available yet",
-                                 subtitle: "Real plans, not shipped. Each row turns itself on once the work behind it lands.") {
-                        PlaceholderRow(feature: .cheats)
-                        RowDivider()
-                        PlaceholderRow(feature: .texturePacks)
-                        RowDivider()
-                        PlaceholderRow(feature: .cameraFeed)
-                        RowDivider()
-                        PlaceholderRow(feature: .articBase)
-                        RowDivider()
-                        PlaceholderRow(feature: .cpuJIT)
+                        SettingsCard("Controls", subtitle: "Opacity and size apply to every layout") {
+                            SettingRow("Opacity") {
+                                ValueSlider(value: settings.clampedOpacity,
+                                            range: 0.25...1,
+                                            text: "\(Int(settings.clampedOpacity * 100))%") { value in
+                                    store.updateGlobal { $0.controlsOpacity = value }
+                                }
+                            }
+                            RowDivider()
+                            SettingRow("Size") {
+                                ValueSlider(value: settings.clampedScale,
+                                            range: 0.7...1.35,
+                                            text: "\(Int(settings.clampedScale * 100))%") { value in
+                                    store.updateGlobal { $0.controlsScale = value }
+                                }
+                            }
+                            RowDivider()
+                            SettingRow("Haptics") {
+                                SettingsToggle(isOn: settings.hapticsEnabled) { value in
+                                    store.updateGlobal { $0.hapticsEnabled = value }
+                                }
+                            }
+                        }
+                        .entrance(4)
+
+                        SettingsCard("Not available yet",
+                                     subtitle: "Real plans, not shipped. Each row turns itself on once the work behind it lands.") {
+                            PlaceholderRow(feature: .cheats)
+                            RowDivider()
+                            PlaceholderRow(feature: .texturePacks)
+                            RowDivider()
+                            PlaceholderRow(feature: .cameraFeed)
+                            RowDivider()
+                            PlaceholderRow(feature: .articBase)
+                            RowDivider()
+                            PlaceholderRow(feature: .cpuJIT)
+                        }
+                        .entrance(5)
                     }
                 }
+                // Room for the compact bar when the page scrolls under it.
+                .padding(.bottom, Design.Space.xxl * 3)
             }
-            // Room for the compact bar when the page scrolls under it.
-            .padding(.bottom, Design.Space.xxl * 3)
+            .screenScrollSpace()
+            .onPreferenceChange(ScrollOffsetKey.self) { value in
+                scrollOffset = value
+            }
         }
     }
 
@@ -435,81 +454,96 @@ struct AppSettingsView: View {
     @State private var usage = SettingsStore.StorageUsage()
     @State private var cacheMessage: String?
     @State private var showsCacheAlert = false
+    @State private var scrollOffset: CGFloat = 0
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Design.Space.l) {
-                ScreenHeader(title: "Settings", subtitle: "System files, storage and the core")
+        VStack(spacing: 0) {
+            CollapsingTitle(title: "Settings",
+                            subtitle: "System files, storage and the core",
+                            offset: scrollOffset)
 
+            ScrollView {
                 VStack(alignment: .leading, spacing: Design.Space.l) {
-                    SettingsCard("System files", subtitle: "What the core reads from Documents/Azahar") {
-                        ForEach(library.coreFileStatus()) { status in
-                            HStack(alignment: .top, spacing: Design.Space.s) {
-                                Image(systemName: status.present ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(status.present ? Design.Palette.positive : Color.orange)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(status.id)
-                                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Design.Palette.ink)
-                                    Text(status.present ? status.note : "missing · \(status.note)")
-                                        .font(Design.Fonts.caption)
-                                        .foregroundColor(status.present ? Design.Palette.secondaryInk : Color.orange)
+                    ScrollOffsetReader()
+
+                    VStack(alignment: .leading, spacing: Design.Space.l) {
+                        SettingsCard("System files", subtitle: "What the core reads from Documents/Azahar") {
+                            ForEach(library.coreFileStatus()) { status in
+                                HStack(alignment: .top, spacing: Design.Space.s) {
+                                    Image(systemName: status.present ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(status.present ? Design.Palette.positive : Color.orange)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(status.id)
+                                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                            .foregroundColor(Design.Palette.ink)
+                                        Text(status.present ? status.note : "missing · \(status.note)")
+                                            .font(Design.Fonts.caption)
+                                            .foregroundColor(status.present ? Design.Palette.secondaryInk : Color.orange)
+                                    }
+                                    Spacer(minLength: 0)
                                 }
-                                Spacer(minLength: 0)
+                                .padding(.vertical, 2)
                             }
-                            .padding(.vertical, 2)
                         }
-                    }
+                        .entrance(0)
 
-                    SettingsCard("Storage", subtitle: "Counted from the app's own folders") {
-                        storageRow("ROMs", usage.romsBytes)
-                        storageRow("Save data", usage.saveDataBytes)
-                        storageRow("Save states", usage.stateBytes)
-                        storageRow("Shader cache", usage.cacheBytes)
-                        RowDivider()
-                        storageRow("Total", usage.totalBytes)
+                        SettingsCard("Storage", subtitle: "Counted from the app's own folders") {
+                            storageRow("ROMs", usage.romsBytes)
+                            storageRow("Save data", usage.saveDataBytes)
+                            storageRow("Save states", usage.stateBytes)
+                            storageRow("Shader cache", usage.cacheBytes)
+                            RowDivider()
+                            storageRow("Total", usage.totalBytes)
 
-                        Button(action: { showsCacheAlert = true }) {
-                            Text("Clear shader cache")
-                                .font(Design.Fonts.caption.weight(.semibold))
-                                .foregroundColor(Design.Palette.ink)
-                                .padding(.horizontal, Design.Space.m)
-                                .frame(height: 36)
-                                .background(Capsule().fill(Design.Palette.card))
-                                .overlay(Capsule().stroke(Design.Palette.hairline, lineWidth: 1))
-                                .contentShape(Capsule())
+                            Button(action: { showsCacheAlert = true }) {
+                                Text("Clear shader cache")
+                                    .font(Design.Fonts.caption.weight(.semibold))
+                                    .foregroundColor(Design.Palette.ink)
+                                    .padding(.horizontal, Design.Space.m)
+                                    .frame(height: 36)
+                                    .background(Capsule().fill(Design.Palette.card))
+                                    .overlay(Capsule().stroke(Design.Palette.hairline, lineWidth: 1))
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(PressableStyle())
+                            .pressHaptic()
+                            .padding(.top, Design.Space.xxs)
                         }
-                        .buttonStyle(PressableStyle())
-                        .padding(.top, Design.Space.xxs)
-                    }
+                        .entrance(1)
 
-                    SettingsCard("About", subtitle: nil) {
-                        SettingRow("Core") {
-                            Text(library.coreDescription)
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundColor(Design.Palette.secondaryInk)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.trailing)
-                        }
-                        RowDivider()
-                        SettingRow("Core check") {
-                            Text(library.coreStatus)
+                        SettingsCard("About", subtitle: nil) {
+                            SettingRow("Core") {
+                                Text(library.coreDescription)
+                                    .font(.system(size: 13, design: .monospaced))
+                                    .foregroundColor(Design.Palette.secondaryInk)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            RowDivider()
+                            SettingRow("Core check") {
+                                Text(library.coreStatus)
+                                    .font(Design.Fonts.caption)
+                                    .foregroundColor(Design.Palette.secondaryInk)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            Text("3DS emulation powered by Azahar · GPLv3\nFrontend for iPadOS 14.")
                                 .font(Design.Fonts.caption)
                                 .foregroundColor(Design.Palette.secondaryInk)
-                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        Text("3DS emulation powered by Azahar · GPLv3\nFrontend for iPadOS 14.")
-                            .font(Design.Fonts.caption)
-                            .foregroundColor(Design.Palette.secondaryInk)
-                            .fixedSize(horizontal: false, vertical: true)
+                        .entrance(2)
                     }
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, Design.Space.sideMargin)
                 }
-                .frame(maxWidth: 720, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, Design.Space.sideMargin)
+                .padding(.bottom, Design.Space.xxl * 3)
             }
-            .padding(.bottom, Design.Space.xxl * 3)
+            .screenScrollSpace()
+            .onPreferenceChange(ScrollOffsetKey.self) { value in
+                scrollOffset = value
+            }
         }
         .onAppear(perform: refreshUsage)
         .alert(isPresented: $showsCacheAlert) {
