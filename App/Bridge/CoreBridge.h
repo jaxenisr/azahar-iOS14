@@ -117,4 +117,12 @@ FOUNDATION_EXPORT const char *AZCoreRendererName(void);
 /// YES when frames are arriving from the GPU rather than as CPU bitmaps.
 FOUNDATION_EXPORT BOOL AZCoreUsesHardwareVideo(void);
 
+/// Presents the stacked layout with a hinge between the two screens.
+///
+/// `hinge` is the gap as a fraction of the presented pair's height, 0 to present
+/// the core's frame as it is. The core stacks the screens flush, so the visible
+/// hinge comes from here. Safe to call before the core is initialised: the value
+/// is applied when the presentation host is created.
+FOUNDATION_EXPORT void AZCoreSetStackedPresentation(float hinge);
+
 NS_ASSUME_NONNULL_END

@@ -1,10 +1,12 @@
 #import "CoreVulkan.h"
+#import "CoreBridge.h"
 
 #import <QuartzCore/QuartzCore.h>
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_metal.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -87,6 +89,24 @@ bool has_extension(const std::vector<VkExtensionProperties> &available, const ch
 
 } // namespace
 
+namespace {
+
+// Gap for the stacked layout, as a fraction of the presented pair's height. The
+// playback screen lays out — and so sets this — before the core starts, which is
+// before there is a host to give it to, so it waits here and the host picks it up
+// when it is created.
+std::atomic<float> stacked_hinge{0.0f};
+
+} // namespace
+
+void AZCoreSetStackedPresentation(float hinge) {
+    if (!(hinge > 0.0f)) {
+        stacked_hinge.store(0.0f);
+        return;
+    }
+    stacked_hinge.store(hinge > 0.25f ? 0.25f : hinge);
+}
+
 struct AZVulkanHost {
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -118,6 +138,10 @@ struct AZVulkanHost {
     // Size of the image the core renders, from its reported geometry.
     unsigned source_width = 0;
     unsigned source_height = 0;
+
+    // Gap between the two stacked screens, as a fraction of the presented
+    // pair's height. Set from the frontend, read by the emulation thread.
+    std::atomic<float> hinge{0.0f};
 
     std::mutex queue_mutex;
     char description[192] = {0};
@@ -489,6 +513,7 @@ AZVulkanHost *AZVulkanHostCreate(void *metalLayer,
 
     auto *host = new AZVulkanHost();
     host->layer = metalLayer;
+    host->hinge.store(stacked_hinge.load());
     host->gipa = vkGetInstanceProcAddr;
 
     const VkApplicationInfo *application = negotiation->get_application_info != nullptr
@@ -619,16 +644,21 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
         return;
     }
 
-    // Keep the frame's aspect ratio: fit it inside the drawable and centre it.
+    // Keep the picture's aspect ratio: fit it inside the drawable and centre it.
+    // In the stacked layout the picture is the two screens plus the hinge, which
+    // is taller than the flush frame the core composed, so its aspect is shorter.
+    const float hinge = host->hinge.load();
     const double source_aspect = static_cast<double>(source_width) / source_height;
+    const double presented_aspect =
+        hinge > 0.0f ? source_aspect * (1.0 - static_cast<double>(hinge)) : source_aspect;
     const double drawable_aspect =
         static_cast<double>(host->extent.width) / static_cast<double>(host->extent.height);
     uint32_t destination_width = host->extent.width;
     uint32_t destination_height = host->extent.height;
-    if (drawable_aspect > source_aspect) {
-        destination_width = static_cast<uint32_t>(std::lround(destination_height * source_aspect));
+    if (drawable_aspect > presented_aspect) {
+        destination_width = static_cast<uint32_t>(std::lround(destination_height * presented_aspect));
     } else {
-        destination_height = static_cast<uint32_t>(std::lround(destination_width / source_aspect));
+        destination_height = static_cast<uint32_t>(std::lround(destination_width / presented_aspect));
     }
     if (destination_width == 0 || destination_height == 0) {
         return;
@@ -663,19 +693,48 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
     vkCmdClearColorImage(host->command_buffer, host->swapchain_images[index],
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
 
-    VkImageBlit blit = {};
-    blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    blit.srcSubresource.layerCount = 1;
-    blit.srcOffsets[0] = {0, 0, 0};
-    blit.srcOffsets[1] = {source_width, source_height, 1};
-    blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    blit.dstSubresource.layerCount = 1;
-    blit.dstOffsets[0] = {offset_x, offset_y, 0};
-    blit.dstOffsets[1] = {offset_x + static_cast<int32_t>(destination_width),
-                          offset_y + static_cast<int32_t>(destination_height), 1};
+    // One blit for the frame as the core composed it. In the stacked layout the
+    // core has put the top screen in the upper half of the frame and the bottom
+    // screen in the lower half, flush against each other, so the same frame is
+    // blitted twice with the hinge left between the halves.
+    std::vector<VkImageBlit> blits;
+    if (hinge > 0.0f) {
+        const int32_t unit = static_cast<int32_t>(
+            std::lround(destination_height * (1.0 - static_cast<double>(hinge)) / 2.0));
+        const int32_t gap = static_cast<int32_t>(destination_height) - unit * 2;
+        const int32_t split = static_cast<int32_t>(source_height / 2);
+        for (int32_t half = 0; half < 2; half++) {
+            VkImageBlit blit = {};
+            blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            blit.srcSubresource.layerCount = 1;
+            blit.srcOffsets[0] = {0, half == 0 ? 0 : split, 0};
+            blit.srcOffsets[1] = {source_width, half == 0 ? split : static_cast<int32_t>(source_height), 1};
+            blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            blit.dstSubresource.layerCount = 1;
+            const int32_t top = half == 0 ? offset_y : offset_y + unit + gap;
+            const int32_t bottom = half == 0 ? offset_y + unit
+                                             : offset_y + static_cast<int32_t>(destination_height);
+            blit.dstOffsets[0] = {offset_x, top, 0};
+            blit.dstOffsets[1] = {offset_x + static_cast<int32_t>(destination_width), bottom, 1};
+            blits.push_back(blit);
+        }
+    } else {
+        VkImageBlit blit = {};
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.layerCount = 1;
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {source_width, source_height, 1};
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.layerCount = 1;
+        blit.dstOffsets[0] = {offset_x, offset_y, 0};
+        blit.dstOffsets[1] = {offset_x + static_cast<int32_t>(destination_width),
+                              offset_y + static_cast<int32_t>(destination_height), 1};
+        blits.push_back(blit);
+    }
     vkCmdBlitImage(host->command_buffer, host->frame_image,
                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, host->swapchain_images[index],
-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   static_cast<uint32_t>(blits.size()), blits.data(), VK_FILTER_LINEAR);
 
     barrier(host->command_buffer, host->swapchain_images[index],
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,

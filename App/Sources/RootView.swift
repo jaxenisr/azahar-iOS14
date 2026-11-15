@@ -226,6 +226,9 @@ struct SegmentedRow: View {
                 .buttonStyle(CardButtonStyle(scale: 0.95, pressedOpacity: 0.8))
             }
         }
+        // One width for every segmented control, so four options and eight
+        // options do not end up as two different sizes of chip on one screen.
+        .frame(maxWidth: 520)
     }
 }
 

@@ -8,6 +8,11 @@ enum PlaybackLayout: String, Codable, CaseIterable, Identifiable {
     case largeScreen = "large_screen"
     case sideBySide = "side_by_side"
     case topOnly = "single_screen"
+    /// The core's `default` option: the top screen, then the bottom screen
+    /// directly beneath it at its own smaller size, both on one vertical axis,
+    /// exactly as the hardware holds them. Stacked is how the console is meant
+    /// to be held, so it is the default a title starts with.
+    case stacked = "default"
 
     var id: String { rawValue }
 
@@ -16,8 +21,21 @@ enum PlaybackLayout: String, Codable, CaseIterable, Identifiable {
         case .largeScreen: return "Top large"
         case .sideBySide: return "Side by side"
         case .topOnly: return "Top only"
+        case .stacked: return "Stacked"
         }
     }
+
+    /// Hinge between the two screens in `stacked`, as a fraction of the height
+    /// the pair occupies on screen. The core composes the two screens flush (its
+    /// `screen_gap` is 0, and the libretro core exposes no option for it), so the
+    /// present path draws the halves with this gap between them: about 10 pt on a
+    /// 500 pt pair, and proportional at any other size.
+    static let stackedHinge: CGFloat = 0.02
+
+    /// Aspect of the pair as it is presented in `stacked`: each screen is 400x240,
+    /// so the two together are 400x480, plus the hinge. Other layouts are presented
+    /// at whatever geometry the core reports for them.
+    static let stackedAspect: CGFloat = (1 - stackedHinge) / 1.2
 }
 
 /// How fast the emulation thread is allowed to run.
@@ -58,7 +76,7 @@ enum PlaybackSpeed: Double, Codable, CaseIterable, Identifiable {
 /// applied.
 struct EmulationSettings: Codable, Equatable {
     var resolutionScale: Int = 1
-    var layout: PlaybackLayout = .largeScreen
+    var layout: PlaybackLayout = .stacked
     var speed: PlaybackSpeed = .normal
     var cpuClockPercent: Int = 100
     var volume: Double = 0.8

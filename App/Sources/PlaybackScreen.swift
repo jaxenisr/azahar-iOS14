@@ -27,8 +27,11 @@ struct PlaybackScreen: View {
     }
 
     /// The core's own geometry, so the picture is drawn at its aspect instead of
-    /// being letterboxed inside a rect nobody can see.
+    /// being letterboxed inside a rect nobody can see. Stacked is the exception:
+    /// the core composes the two screens flush, and the picture as presented has
+    /// the hinge in it as well.
     private var sourceAspect: CGFloat {
+        if session.layout == .stacked { return PlaybackLayout.stackedAspect }
         let source = AZCoreSourceSize()
         guard source.width > 1, source.height > 1 else { return 400.0 / 480.0 }
         return source.width / source.height
@@ -53,7 +56,8 @@ struct PlaybackScreen: View {
                     .frame(width: metrics.image.width, height: metrics.image.height)
                     .offset(x: metrics.image.minX, y: metrics.image.minY)
 
-                TouchSurface { x, y, pressed in
+                TouchSurface(stacked: session.layout == .stacked,
+                             hinge: PlaybackLayout.stackedHinge) { x, y, pressed in
                     session.setPointer(x: x, y: y, pressed: pressed)
                 }
                 .frame(width: metrics.image.width, height: metrics.image.height)
@@ -88,6 +92,10 @@ struct PlaybackScreen: View {
         .ignoresSafeArea()
         .background(Color.black)
         .onAppear {
+            // The present path has to know about the hinge before the first frame.
+            AZCoreSetStackedPresentation(session.layout == .stacked
+                                         ? Float(PlaybackLayout.stackedHinge)
+                                         : 0)
             session.startIfNeeded()
             ControllerMonitor.shared.session = session
             ControllerMonitor.shared.refresh()
@@ -140,7 +148,9 @@ struct PlaybackScreen: View {
                 session.attach(metalLayer: layer)
             }
             if !session.usesHardwareVideo, let image = session.image {
-                FrameImageView(image: image)
+                FrameImageView(image: image,
+                               stacked: session.layout == .stacked,
+                               hinge: PlaybackLayout.stackedHinge)
             }
         }
         .clipped()
@@ -339,30 +349,75 @@ final class MetalContainerView: UIView {
 
 /// Draws a software-rendered frame. A layer's contents is the cheapest path from
 /// a CGImage to the screen.
+///
+/// In the stacked layout the two screens are cropped out of the one image and
+/// drawn as separate layers, so the hinge is real space between them and not a
+/// seam inside a stretched picture.
 struct FrameImageView: UIViewRepresentable {
     let image: CGImage
+    var stacked: Bool = false
+    var hinge: CGFloat = 0
 
     func makeUIView(context: Context) -> FrameContainerView {
         FrameContainerView()
     }
 
     func updateUIView(_ view: FrameContainerView, context: Context) {
-        view.layer.contents = image
+        view.show(image, stacked: stacked, hinge: hinge)
     }
 }
 
 final class FrameContainerView: UIView {
+    private let whole = CALayer()
+    private let upper = CALayer()
+    private let lower = CALayer()
+    private var stacked = false
+    private var hinge: CGFloat = 0
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
-        layer.contentsGravity = .resizeAspect
-        layer.magnificationFilter = .nearest
-        layer.minificationFilter = .nearest
         isUserInteractionEnabled = false
+        for layer in [whole, upper, lower] {
+            layer.contentsGravity = .resizeAspect
+            layer.magnificationFilter = .nearest
+            layer.minificationFilter = .nearest
+            self.layer.addSublayer(layer)
+        }
+        upper.isHidden = true
+        lower.isHidden = true
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func show(_ image: CGImage, stacked: Bool, hinge: CGFloat) {
+        self.stacked = stacked
+        self.hinge = min(max(hinge, 0), 0.25)
+        whole.contents = stacked ? nil : image
+        whole.isHidden = stacked
+        upper.isHidden = !stacked
+        lower.isHidden = !stacked
+        if stacked {
+            // The core composes the pair flush, one screen above the other.
+            upper.contents = image
+            lower.contents = image
+            upper.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 0.5)
+            lower.contentsRect = CGRect(x: 0, y: 0.5, width: 1, height: 0.5)
+        }
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        whole.frame = bounds
+        guard stacked else { return }
+        let unit = bounds.height * (1 - hinge) / 2
+        let gap = bounds.height - unit * 2
+        upper.frame = CGRect(x: 0, y: 0, width: bounds.width, height: unit)
+        lower.frame = CGRect(x: 0, y: unit + gap,
+                             width: bounds.width, height: bounds.height - unit - gap)
     }
 }
 
@@ -370,21 +425,29 @@ final class FrameContainerView: UIView {
 /// bottom screen itself, so this only has to say where the finger is inside the
 /// frame the core is producing.
 struct TouchSurface: UIViewRepresentable {
+    var stacked: Bool = false
+    var hinge: CGFloat = 0
     let onTouch: (CGFloat, CGFloat, Bool) -> Void
 
     func makeUIView(context: Context) -> TouchSurfaceView {
         let view = TouchSurfaceView()
         view.onTouch = onTouch
+        view.stacked = stacked
+        view.hinge = hinge
         return view
     }
 
     func updateUIView(_ view: TouchSurfaceView, context: Context) {
         view.onTouch = onTouch
+        view.stacked = stacked
+        view.hinge = hinge
     }
 }
 
 final class TouchSurfaceView: UIView {
     var onTouch: ((CGFloat, CGFloat, Bool) -> Void)?
+    var stacked = false
+    var hinge: CGFloat = 0
     private var activeTouch: UITouch?
 
     override init(frame: CGRect) {
@@ -424,10 +487,27 @@ final class TouchSurfaceView: UIView {
 
     /// The view's frame is already the picture's rect, so a touch maps straight
     /// onto the core's frame; the core then maps it onto the bottom screen.
+    ///
+    /// In the stacked layout the picture is the pair plus the hinge, and only the
+    /// lower half is a touchscreen: a point there is normalised against that half,
+    /// which is exactly where the core's bottom-screen rect sits in its own frame.
+    /// The pixel under the finger is therefore the pixel the core gets, whatever
+    /// the scale. Points above the lower half map outside it and are ignored.
     private func report(_ touch: UITouch, pressed: Bool) {
         let point = touch.location(in: self)
         let size = bounds.size
         guard size.width > 1, size.height > 1 else { return }
+
+        if stacked {
+            let fraction = min(max(hinge, 0), 0.25)
+            let unit = size.height * (1 - fraction) / 2
+            guard unit > 1 else { return }
+            let bottomTop = size.height - unit
+            let x = (point.x / size.width) * 2 - 1
+            let y = (point.y - bottomTop) / unit
+            onTouch?(min(max(x, -1.5), 1.5), min(max(y, -1.5), 1.5), pressed)
+            return
+        }
 
         let source = AZCoreSourceSize()
         let sourceWidth = source.width > 1 ? source.width : 400
