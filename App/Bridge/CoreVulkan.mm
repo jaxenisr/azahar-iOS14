@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_metal.h>
 
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,13 @@
 // that image into a CAMetalLayer drawable and presents it. Every stage reports
 // what failed and why: a silent fall back to the software rasteriser is exactly
 // the failure this frontend must not hide.
+//
+// The composite image is the 3DS screens arranged by the core's own layout
+// option. retro_vulkan_image carries no extent, so the size comes from the
+// geometry the core reports with SET_GEOMETRY / SET_SYSTEM_AV_INFO -- which it
+// re-sends when the layout or the first frames change. That size is the source
+// rectangle, and the presented image keeps its aspect: the drawable is cleared
+// and the frame is centred inside it, never stretched.
 
 namespace {
 
@@ -107,6 +115,7 @@ struct AZVulkanHost {
     VkFormat frame_format = VK_FORMAT_UNDEFINED;
     bool have_frame = false;
 
+    // Size of the image the core renders, from its reported geometry.
     unsigned source_width = 0;
     unsigned source_height = 0;
 
@@ -414,6 +423,8 @@ void set_image_callback(void *handle,
     host->frame_layout = image->image_layout;
     host->frame_format = image->create_info.format;
     host->have_frame = host->frame_image != VK_NULL_HANDLE;
+    // The image's size is not in this struct; it is the geometry the core
+    // reported, which AZVulkanHostSetSourceSize keeps current.
 }
 
 uint32_t get_sync_index_callback(void *handle) {
@@ -542,6 +553,9 @@ void AZVulkanHostSetSourceSize(AZVulkanHost *host, unsigned width, unsigned heig
     if (host == nullptr) {
         return;
     }
+    if (host->source_width != width || host->source_height != height) {
+        say("frame size now %ux%u\n", width, height);
+    }
     host->source_width = width;
     host->source_height = height;
 }
@@ -580,6 +594,16 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
         return;
     }
 
+    int32_t source_width = static_cast<int32_t>(host->source_width);
+    int32_t source_height = static_cast<int32_t>(host->source_height);
+    if (source_width <= 0 || source_height <= 0) {
+        source_width = static_cast<int32_t>(host->extent.width);
+        source_height = static_cast<int32_t>(host->extent.height);
+    }
+    if (source_width <= 0 || source_height <= 0) {
+        return;
+    }
+
     uint32_t index = 0;
     VkResult result = vkAcquireNextImageKHR(host->device, host->swapchain, UINT64_MAX,
                                             host->acquired, VK_NULL_HANDLE, &index);
@@ -594,6 +618,23 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
         }
         return;
     }
+
+    // Keep the frame's aspect ratio: fit it inside the drawable and centre it.
+    const double source_aspect = static_cast<double>(source_width) / source_height;
+    const double drawable_aspect =
+        static_cast<double>(host->extent.width) / static_cast<double>(host->extent.height);
+    uint32_t destination_width = host->extent.width;
+    uint32_t destination_height = host->extent.height;
+    if (drawable_aspect > source_aspect) {
+        destination_width = static_cast<uint32_t>(std::lround(destination_height * source_aspect));
+    } else {
+        destination_height = static_cast<uint32_t>(std::lround(destination_width / source_aspect));
+    }
+    if (destination_width == 0 || destination_height == 0) {
+        return;
+    }
+    const int32_t offset_x = static_cast<int32_t>((host->extent.width - destination_width) / 2);
+    const int32_t offset_y = static_cast<int32_t>((host->extent.height - destination_height) / 2);
 
     vkResetCommandBuffer(host->command_buffer, 0);
     VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -611,12 +652,16 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-    const int32_t source_width = static_cast<int32_t>(host->source_width > 0
-                                                          ? host->source_width
-                                                          : host->extent.width);
-    const int32_t source_height = static_cast<int32_t>(host->source_height > 0
-                                                           ? host->source_height
-                                                           : host->extent.height);
+    // The letterbox bars have to be painted: the drawable is reused between
+    // frames and would otherwise keep the previous frame's content there.
+    VkClearColorValue black = {};
+    black.float32[0] = 0.0f;
+    black.float32[1] = 0.0f;
+    black.float32[2] = 0.0f;
+    black.float32[3] = 1.0f;
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(host->command_buffer, host->swapchain_images[index],
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
 
     VkImageBlit blit = {};
     blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -625,9 +670,9 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
     blit.srcOffsets[1] = {source_width, source_height, 1};
     blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     blit.dstSubresource.layerCount = 1;
-    blit.dstOffsets[0] = {0, 0, 0};
-    blit.dstOffsets[1] = {static_cast<int32_t>(host->extent.width),
-                          static_cast<int32_t>(host->extent.height), 1};
+    blit.dstOffsets[0] = {offset_x, offset_y, 0};
+    blit.dstOffsets[1] = {offset_x + static_cast<int32_t>(destination_width),
+                          offset_y + static_cast<int32_t>(destination_height), 1};
     vkCmdBlitImage(host->command_buffer, host->frame_image,
                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, host->swapchain_images[index],
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);

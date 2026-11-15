@@ -93,10 +93,11 @@ struct PlaybackScreen: View {
     private var statistics: some View {
         VStack(alignment: .leading, spacing: 3) {
             statistic("FPS", String(format: "%.1f", session.framesPerSecond))
+            statistic("Target", String(format: "%.1f fps", session.targetFramesPerSecond))
             statistic("Speed", String(format: "%.1f%% of real time", session.speedPercent))
             statistic("Frame", String(format: "%.1f ms", session.frameMilliseconds))
             statistic("Renderer", session.rendererName)
-            statistic("Resolution", "\(session.resolutionScale)x")
+            statistic("Resolution", "\(session.resolutionScale)x · \(session.layout.title)")
             statistic("Frames", "\(session.deliveredFrames)")
         }
         .padding(10)
