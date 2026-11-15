@@ -6,8 +6,9 @@ import QuartzCore
 /// back to its software rasteriser its frames arrive as bitmaps instead. Both
 /// paths share the same overlay so the numbers can always be read.
 ///
-/// The game image is never underneath a control: the controls are laid out in the
-/// margins the aspect-fit image leaves, and only their own frames take touches.
+/// Everything on this screen is placed by `PlaybackGeometry`: the picture is
+/// centred in the space the controls leave, the controls sit in the margins, and
+/// the HUD docks in a margin too. Nothing is drawn over the game.
 struct PlaybackScreen: View {
     @ObservedObject var session: PlaybackSession
     @ObservedObject private var store = SettingsStore.shared
@@ -25,26 +26,41 @@ struct PlaybackScreen: View {
         return window?.safeAreaInsets ?? .zero
     }
 
+    /// The core's own geometry, so the picture is drawn at its aspect instead of
+    /// being letterboxed inside a rect nobody can see.
+    private var sourceAspect: CGFloat {
+        let source = AZCoreSourceSize()
+        guard source.width > 1, source.height > 1 else { return 400.0 / 480.0 }
+        return source.width / source.height
+    }
+
+    private func layout(in size: CGSize) -> PlaybackGeometry {
+        PlaybackGeometry.make(in: size,
+                              safe: safeInsets,
+                              scale: CGFloat(settings.clampedScale),
+                              aspect: sourceAspect,
+                              hud: showsOverlay ? .full : .compact)
+    }
+
     var body: some View {
         GeometryReader { geometry in
-            let metrics = ControlMetrics.make(in: geometry.size,
-                                              safeArea: safeInsets,
-                                              scale: CGFloat(settings.clampedScale))
-            ZStack {
+            let metrics = layout(in: geometry.size)
+
+            ZStack(alignment: .topLeading) {
                 Color.black
 
                 surface
-                    .frame(width: metrics.game.width, height: metrics.game.height)
-                    .position(x: metrics.game.midX, y: metrics.game.midY)
+                    .frame(width: metrics.image.width, height: metrics.image.height)
+                    .offset(x: metrics.image.minX, y: metrics.image.minY)
 
                 TouchSurface { x, y, pressed in
                     session.setPointer(x: x, y: y, pressed: pressed)
                 }
-                .frame(width: metrics.game.width, height: metrics.game.height)
-                .position(x: metrics.game.midX, y: metrics.game.midY)
+                .frame(width: metrics.image.width, height: metrics.image.height)
+                .offset(x: metrics.image.minX, y: metrics.image.minY)
 
                 if !controllers.isConnected {
-                    ControlsOverlay(setup: controlSetup(metrics: metrics, safe: safeInsets),
+                    ControlsOverlay(setup: controlSetup(metrics),
                                     onButton: { mask, pressed in
                                         session.setButton(mask, pressed: pressed)
                                     },
@@ -56,18 +72,16 @@ struct PlaybackScreen: View {
 
                 if case .failed(let reason) = session.phase {
                     failure(reason)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
                 } else if session.image == nil && !session.usesHardwareVideo {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .frame(width: geometry.size.width, height: geometry.size.height)
                 }
 
-                if showsOverlay {
-                    overlay
-                } else {
-                    hudChip.padding(12)
-                        .frame(width: geometry.size.width, height: geometry.size.height,
-                               alignment: .topTrailing)
-                }
+                hud(metrics)
+                    .frame(width: metrics.hud.width, height: metrics.hud.height, alignment: .topLeading)
+                    .offset(x: metrics.hud.minX, y: metrics.hud.minY)
             }
             .statusBar(hidden: true)
         }
@@ -104,15 +118,19 @@ struct PlaybackScreen: View {
         return "audio off · \(name): \(reason)"
     }
 
-    private func controlSetup(metrics: ControlMetrics,
-                              safe: UIEdgeInsets) -> OnScreenControlsView.Setup {
+    private func controlSetup(_ metrics: PlaybackGeometry) -> OnScreenControlsView.Setup {
         var setup = OnScreenControlsView.Setup()
         setup.opacity = CGFloat(settings.clampedOpacity)
-        setup.scale = CGFloat(settings.clampedScale)
         setup.haptics = settings.hapticsEnabled
-        setup.landscape = metrics.landscape
-        setup.game = metrics.game
-        setup.safeArea = safe
+        setup.button = metrics.button
+        setup.offset = metrics.offset
+        setup.stick = metrics.stick
+        setup.dpad = metrics.dpad
+        setup.diamond = metrics.diamond
+        setup.shoulderL = metrics.shoulderL
+        setup.shoulderR = metrics.shoulderR
+        setup.start = metrics.start
+        setup.select = metrics.select
         return setup
     }
 
@@ -147,125 +165,140 @@ struct PlaybackScreen: View {
         }
     }
 
-    // MARK: - Overlay
+    // MARK: - HUD
 
-    private var overlay: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top) {
-                statistics
-                Spacer(minLength: 12)
-                VStack(spacing: 8) {
-                    Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 40, height: 40)
-                            .background(Circle().fill(Color.black.opacity(0.5)))
+    @ViewBuilder
+    private func hud(_ metrics: PlaybackGeometry) -> some View {
+        if showsOverlay {
+            hudCard(metrics)
+        } else {
+            hudPill
+        }
+    }
+
+    private var hudPill: some View {
+        HStack(spacing: 8) {
+            Text(String(format: "%.1f", session.framesPerSecond))
+                .foregroundColor(.green)
+            Text(String(format: "%.1f%%", session.speedPercent))
+                .foregroundColor(.green.opacity(0.75))
+            hudIcon("chevron.down", label: "Show diagnostics") { showsOverlay = true }
+            hudIcon("xmark", label: "Stop emulation") { presentationMode.wrappedValue.dismiss() }
+        }
+        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        .padding(.horizontal, 10)
+        .frame(height: 34)
+        .background(Capsule().fill(Color.black.opacity(0.55)))
+        .overlay(Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1))
+    }
+
+    private func hudCard(_ metrics: PlaybackGeometry) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("PERFORMANCE")
+                    .font(.system(size: 10, weight: .semibold))
+                    .kerning(0.7)
+                    .foregroundColor(.white.opacity(0.42))
+                Spacer(minLength: 4)
+                hudIcon("chevron.up", label: "Hide diagnostics") { showsOverlay = false }
+                hudIcon("xmark", label: "Stop emulation") { presentationMode.wrappedValue.dismiss() }
+            }
+
+            if metrics.hudColumns > 1 {
+                let columns = [GridItem(.flexible(), alignment: .leading),
+                               GridItem(.flexible(), alignment: .leading)]
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 3) {
+                    ForEach(hudRows.indices, id: \.self) { index in
+                        statistic(hudRows[index].0, hudRows[index].1)
                     }
-                    .accessibilityLabel("Stop emulation")
-
-                    hudChip
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(hudRows.indices, id: \.self) { index in
+                        statistic(hudRows[index].0, hudRows[index].1)
+                    }
                 }
             }
 
-            Spacer(minLength: 0)
-
-            if let message = session.saveStateMessage {
-                Text(message)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Capsule().fill(Color.black.opacity(0.72)))
-                    .padding(.bottom, 10)
-            }
-            if let message = session.coreMessage {
-                Text(message)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.orange)
-                    .multilineTextAlignment(.center)
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.7)))
-                    .padding(.horizontal, 24)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    private var hudChip: some View {
-        Button(action: { showsOverlay.toggle() }) {
-            Text("HUD")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundColor(.green.opacity(0.9))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.black.opacity(0.5)))
-        }
-        .accessibilityLabel(showsOverlay ? "Hide diagnostics" : "Show diagnostics")
-    }
-
-    private var statistics: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            statistic("FPS", String(format: "%.1f", session.framesPerSecond))
-            statistic("Target", String(format: "%.1f fps", session.targetFramesPerSecond))
-            statistic("Speed", String(format: "%.1f%% of real time", session.speedPercent))
-            statistic("Limit", session.speedLimitTitle)
-            statistic("Frame", String(format: "%.1f ms", session.frameMilliseconds))
-            statistic("Renderer", session.rendererName)
-            statistic("Resolution", "\(session.resolutionScale)x · \(session.layout.title)")
-            statistic("Frames", "\(session.deliveredFrames)")
-
-            Divider().background(Color.green.opacity(0.25)).padding(.vertical, 2)
-
-            statistic("Audio", session.audio.state)
             if let failure = audioFailure {
                 Text(failure)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundColor(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 258, alignment: .leading)
-                    .padding(.bottom, 2)
             }
-            statistic("Audio cbs", String(format: "%.1f/s · batch", session.audio.batchCallbacksPerSecond))
-            statistic("Audio made", String(format: "%.0f/s · %.0f Hz", session.audio.producedPerSecond, session.audio.coreSampleRate))
-            statistic("Audio used", String(format: "%.0f/s", session.audio.consumedPerSecond))
-            statistic("Audio buf", String(format: "%.0f ms · %llu under · %llu drop",
-                                         session.audio.bufferedMilliseconds,
-                                         session.audio.underruns,
-                                         session.audio.dropped))
 
-            HStack(spacing: 6) {
-                statisticButton("Save state") { session.saveState() }
-                statisticButton("Load state") { session.loadState() }
-                statisticButton("Diagnostics") { showsDiagnostics = true }
+            HStack(spacing: 5) {
+                statisticButton("Save") { session.saveState() }
+                statisticButton("Load") { session.loadState() }
+                statisticButton("Audio") { showsDiagnostics = true }
             }
-            .padding(.top, 4)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.62)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.black.opacity(0.62)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .clipped()
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var hudRows: [(String, String)] {
+        [
+            ("FPS", String(format: "%.1f", session.framesPerSecond)),
+            ("Speed", String(format: "%.1f%%", session.speedPercent)),
+            ("Limit", session.speedLimitTitle),
+            ("Frame", String(format: "%.1f ms", session.frameMilliseconds)),
+            ("Target", String(format: "%.1f", session.targetFramesPerSecond)),
+            ("Renderer", session.rendererName),
+            ("Layout", "\(session.resolutionScale)x · \(session.layout.title)"),
+            ("Frames", "\(session.deliveredFrames)"),
+            ("Audio", session.audio.state),
+            ("Cbs", String(format: "%.0f/s", session.audio.batchCallbacksPerSecond)),
+            ("Made", String(format: "%.0f/s", session.audio.producedPerSecond)),
+            ("Used", String(format: "%.0f/s", session.audio.consumedPerSecond)),
+            ("Buffer", String(format: "%.0f ms", session.audio.bufferedMilliseconds)),
+            ("Under", "\(session.audio.underruns)")
+        ]
     }
 
     private func statistic(_ label: String, _ value: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Text(label)
-                .foregroundColor(.green.opacity(0.7))
-                .frame(width: 78, alignment: .leading)
+                .foregroundColor(.green.opacity(0.6))
+                .frame(width: 44, alignment: .leading)
             Text(value)
                 .foregroundColor(.green)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
         }
-        .font(.system(size: 11, weight: .medium, design: .monospaced))
+        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+    }
+
+    private func hudIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white.opacity(0.8))
+                .frame(width: 24, height: 22)
+                // A chevron drawn at 10 pt is not a button without this.
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(label)
     }
 
     private func statisticButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .foregroundColor(.green)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 6)
+                .frame(height: 24)
+                .frame(maxWidth: .infinity)
                 .background(Capsule().fill(Color.green.opacity(0.16)))
+                .contentShape(Capsule())
         }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
@@ -389,8 +422,8 @@ final class TouchSurfaceView: UIView {
         onTouch?(0, 0, false)
     }
 
-    /// The frame is letterboxed inside this view exactly as the present path
-    /// letterboxes it inside the drawable, so the mapping is the same maths.
+    /// The view's frame is already the picture's rect, so a touch maps straight
+    /// onto the core's frame; the core then maps it onto the bottom screen.
     private func report(_ touch: UITouch, pressed: Bool) {
         let point = touch.location(in: self)
         let size = bounds.size
