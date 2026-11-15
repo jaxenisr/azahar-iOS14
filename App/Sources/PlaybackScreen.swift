@@ -52,12 +52,6 @@ struct PlaybackScreen: View {
             ZStack(alignment: .topLeading) {
                 Color.black
 
-                // Reports which view won hit testing for each touch. It is not a
-                // view in the way: the audit is a recogniser on the window, so it
-                // sees every touch without taking one.
-                TouchAuditProbe()
-                    .frame(width: 1, height: 1)
-
                 surface
                     .frame(width: metrics.image.width, height: metrics.image.height)
                     .offset(x: metrics.image.minX, y: metrics.image.minY)
@@ -444,26 +438,11 @@ final class TouchSurfaceView: UIView {
     var stacked = false
     var hinge: CGFloat = 0
     private var activeTouch: UITouch?
-    /// The dot drawn where the finger landed, so a tap that goes nowhere is still
-    /// visible on the screen it was made on.
-    private let marker = CAShapeLayer()
-    private var markerGeneration = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         isMultipleTouchEnabled = true
-
-        marker.fillColor = UIColor.red.withAlphaComponent(0.85).cgColor
-        marker.strokeColor = UIColor.white.withAlphaComponent(0.9).cgColor
-        marker.lineWidth = 2
-        marker.opacity = 0
-        layer.addSublayer(marker)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        marker.frame = bounds
     }
 
     required init?(coder: NSCoder) {
@@ -474,9 +453,6 @@ final class TouchSurfaceView: UIView {
         guard let touch = touches.first else { return }
         TouchSurfaceView.taps += 1
         activeTouch = touch
-        let point = touch.location(in: self)
-        TouchLog.write("down \(Int(point.x)),\(Int(point.y)) in \(Int(bounds.width))x\(Int(bounds.height)) stacked=\(stacked)")
-        showMarker(at: point)
         report(touch, pressed: true)
     }
 
@@ -496,26 +472,7 @@ final class TouchSurfaceView: UIView {
     private func finish(_ touches: Set<UITouch>) {
         guard let touch = activeTouch, touches.contains(touch) else { return }
         activeTouch = nil
-        TouchLog.write("up")
         onTouch?(0, 0, false)
-    }
-
-    /// A red dot under the finger for four tenths of a second. It outlives the
-    /// touch on purpose: a tap can be shorter than a frame and still happen, so
-    /// the mark has to be readable after the finger is gone.
-    private func showMarker(at point: CGPoint) {
-        let radius: CGFloat = 16
-        marker.path = UIBezierPath(ovalIn: CGRect(x: point.x - radius,
-                                                  y: point.y - radius,
-                                                  width: radius * 2,
-                                                  height: radius * 2)).cgPath
-        marker.opacity = 1
-        markerGeneration += 1
-        let generation = markerGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self = self, self.markerGeneration == generation else { return }
-            self.marker.opacity = 0
-        }
     }
 
     /// The view's frame is already the picture's rect, so a touch maps straight
