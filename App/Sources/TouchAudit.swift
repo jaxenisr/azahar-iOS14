@@ -81,7 +81,7 @@ private final class HitTestRecognizer: UIGestureRecognizer {
     }
 }
 
-private final class TouchAuditHostView: UIView {
+final class TouchAuditHostView: UIView {
     private let recognizer = HitTestRecognizer()
 
     override init(frame: CGRect) {
