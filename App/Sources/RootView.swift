@@ -199,15 +199,17 @@ extension ScreenHeader where Accessory == EmptyView {
 /// header. It keeps this name because every screen already calls it that.
 struct SettingsCard<Content: View>: View {
     let title: String
+    let subtitle: String?
     let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.subtitle = subtitle
         self.content = content()
     }
 
     var body: some View {
-        DesignCard(title) {
+        DesignCard(title, subtitle: subtitle) {
             content
         }
     }
@@ -233,6 +235,22 @@ struct SettingRow<Control: View>: View {
     var body: some View {
         DesignRow(title, subtitle: subtitle, isAvailable: isAvailable) { control }
             .frame(minHeight: 44)
+    }
+}
+
+/// A setting the app cannot honour yet: a real row, the real title, greyed out and
+/// inert, with the phrase the brief asks for followed by what is actually missing.
+struct PlaceholderRow: View {
+    let feature: PlannedFeature
+
+    var body: some View {
+        SettingRow(feature.title,
+                   subtitle: feature.isAvailable
+                    ? nil
+                    : "Unavailable for now — \(feature.missing)",
+                   isAvailable: feature.isAvailable) {
+            EmptyView()
+        }
     }
 }
 
@@ -297,7 +315,7 @@ struct EmulationView: View {
                              subtitle: "Defaults for every title. A title can override these from its own page.")
 
                 column {
-                    SettingsCard("Graphics") {
+                    SettingsCard("Graphics", subtitle: "How the 3DS picture is drawn") {
                         SettingRow("Resolution scale", subtitle: "Applied when playback starts") {
                             SegmentedRow(options: ["1x", "2x", "3x", "4x"],
                                          selection: settings.clampedResolution - 1) { index in
@@ -311,9 +329,11 @@ struct EmulationView: View {
                                 store.updateGlobal { $0.layout = PlaybackLayout.allCases[index] }
                             }
                         }
+                        RowDivider()
+                        PlaceholderRow(feature: .textureFilter)
                     }
 
-                    SettingsCard("Performance") {
+                    SettingsCard("Performance", subtitle: "How fast the emulated machine runs") {
                         SettingRow("Emulation speed",
                                    subtitle: "How fast playback runs, against real time") {
                             SegmentedRow(options: PlaybackSpeed.allCases.map { $0.title },
@@ -329,10 +349,17 @@ struct EmulationView: View {
                                 store.updateGlobal { $0.cpuClockPercent = EmulationSettings.cpuClockChoices[index] }
                             }
                         }
+                        RowDivider()
+                        PlaceholderRow(feature: .new3DSMode)
                     }
 
-                    SettingsCard("Audio") {
-                        SettingRow("Volume", subtitle: "Applies immediately, even mid-game") {
+                    SettingsCard("Region",
+                                 subtitle: "Which market the emulated console reports. Some titles refuse to boot outside their own region.") {
+                        PlaceholderRow(feature: .regionOverride)
+                    }
+
+                    SettingsCard("Audio", subtitle: "Applies immediately, even mid-game") {
+                        SettingRow("Volume") {
                             ValueSlider(value: settings.volume,
                                         range: 0...1,
                                         text: "\(Int(settings.volume * 100))%") { value in
@@ -347,7 +374,7 @@ struct EmulationView: View {
                         }
                     }
 
-                    SettingsCard("Controls") {
+                    SettingsCard("Controls", subtitle: "Opacity and size apply to every layout") {
                         SettingRow("Opacity") {
                             ValueSlider(value: settings.clampedOpacity,
                                         range: 0.25...1,
@@ -369,6 +396,19 @@ struct EmulationView: View {
                                 store.updateGlobal { $0.hapticsEnabled = value }
                             }
                         }
+                    }
+
+                    SettingsCard("Not available yet",
+                                 subtitle: "Real plans, not shipped. Each row turns itself on once the work behind it lands.") {
+                        PlaceholderRow(feature: .cheats)
+                        RowDivider()
+                        PlaceholderRow(feature: .texturePacks)
+                        RowDivider()
+                        PlaceholderRow(feature: .cameraFeed)
+                        RowDivider()
+                        PlaceholderRow(feature: .articBase)
+                        RowDivider()
+                        PlaceholderRow(feature: .cpuJIT)
                     }
                 }
             }
@@ -402,7 +442,7 @@ struct AppSettingsView: View {
                 ScreenHeader(title: "Settings", subtitle: "System files, storage and the core")
 
                 VStack(alignment: .leading, spacing: Design.Space.l) {
-                    SettingsCard("System files") {
+                    SettingsCard("System files", subtitle: "What the core reads from Documents/Azahar") {
                         ForEach(library.coreFileStatus()) { status in
                             HStack(alignment: .top, spacing: Design.Space.s) {
                                 Image(systemName: status.present ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
@@ -422,7 +462,7 @@ struct AppSettingsView: View {
                         }
                     }
 
-                    SettingsCard("Storage") {
+                    SettingsCard("Storage", subtitle: "Counted from the app's own folders") {
                         storageRow("ROMs", usage.romsBytes)
                         storageRow("Save data", usage.saveDataBytes)
                         storageRow("Save states", usage.stateBytes)
@@ -444,12 +484,19 @@ struct AppSettingsView: View {
                         .padding(.top, Design.Space.xxs)
                     }
 
-                    SettingsCard("About") {
+                    SettingsCard("About", subtitle: nil) {
                         SettingRow("Core") {
                             Text(library.coreDescription)
                                 .font(.system(size: 13, design: .monospaced))
                                 .foregroundColor(Design.Palette.secondaryInk)
                                 .lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        RowDivider()
+                        SettingRow("Core check") {
+                            Text(library.coreStatus)
+                                .font(Design.Fonts.caption)
+                                .foregroundColor(Design.Palette.secondaryInk)
                                 .multilineTextAlignment(.trailing)
                         }
                         Text("3DS emulation powered by Azahar · GPLv3\nFrontend for iPadOS 14.")
