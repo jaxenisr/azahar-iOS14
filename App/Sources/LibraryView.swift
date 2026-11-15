@@ -85,7 +85,6 @@ struct LibraryView: View {
                         .animation(Design.Motion.panel)
                 }
             }
-            .animation(Design.Motion.panel)
         }
         .background(Design.Palette.background.ignoresSafeArea())
         .sheet(isPresented: $isImporting) {
@@ -206,32 +205,36 @@ struct LibraryView: View {
     private var gameGrid: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Design.Space.xl) {
-                ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
-                    VStack(alignment: .leading, spacing: Design.Space.s) {
-                        Text(section.letter)
-                            .font(Design.Fonts.section)
-                            .foregroundColor(Design.Palette.ink)
-                        LazyVGrid(columns: columns, alignment: .leading, spacing: Design.Space.l) {
-                            ForEach(section.games) { game in
-                                CoverCell(artwork: game.icon,
-                                          name: game.title,
-                                          meta: game.subtitle,
-                                          aspect: 1,
-                                          heroNamespace: hero,
-                                          heroID: game.id,
-                                          heroSource: selected?.id != game.id,
-                                          onOpen: { openDetail(game) },
-                                          onMenu: { menuGame = game })
-                            }
-                        }
-                    }
-                    .entrance(index)
+                ForEach(sections.indices, id: \.self) { index in
+                    sectionView(sections[index], index: index)
                 }
             }
             .padding(.horizontal, Design.Space.sideMargin)
             .padding(.top, Design.Space.s)
             .padding(.bottom, Design.Space.xxl * 3)
         }
+    }
+
+    private func sectionView(_ section: LibrarySection, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: Design.Space.s) {
+            Text(section.letter)
+                .font(Design.Fonts.section)
+                .foregroundColor(Design.Palette.ink)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: Design.Space.l) {
+                ForEach(section.games) { game in
+                    CoverCell(artwork: game.icon,
+                              name: game.title,
+                              meta: game.subtitle,
+                              aspect: 1,
+                              heroNamespace: hero,
+                              heroID: game.id,
+                              heroSource: selected?.id != game.id,
+                              onOpen: { openDetail(game) },
+                              onMenu: { menuGame = game })
+                }
+            }
+        }
+        .entrance(index)
     }
 
     private var systemFileList: some View {
@@ -356,7 +359,8 @@ struct LibraryView: View {
 struct GameDetailView: View {
     let game: GameEntry
     var onClose: (() -> Void)? = nil
-    var heroNamespace: Namespace.ID? = nil
+    /// The library's namespace, so the cover can grow into this hero.
+    let heroNamespace: Namespace.ID
 
     @EnvironmentObject private var library: GameLibrary
     @ObservedObject private var store = SettingsStore.shared
@@ -492,9 +496,9 @@ struct GameDetailView: View {
                         .frame(width: 132, height: 132)
                         .clipShape(RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous))
                         .designShadow(Design.Elevation.card)
+                        .matchedGeometryEffect(id: game.id, in: heroNamespace)
                 }
             }
-            .matchedGeometryEffect(id: game.id, in: heroNamespace ?? Namespace().wrappedValue, isSource: true)
 
             Text(game.title)
                 .font(.system(size: 24, weight: .bold))
