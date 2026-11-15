@@ -24,9 +24,11 @@
 // the failure this frontend must not hide.
 //
 // The composite image is the 3DS screens arranged by the core's own layout
-// option, so its intrinsic size changes with that layout and with resolution
-// scale. The presented image keeps the aspect it reports: the drawable is
-// cleared and the frame is centred inside it, never stretched.
+// option. retro_vulkan_image carries no extent, so the size comes from the
+// geometry the core reports with SET_GEOMETRY / SET_SYSTEM_AV_INFO -- which it
+// re-sends when the layout or the first frames change. That size is the source
+// rectangle, and the presented image keeps its aspect: the drawable is cleared
+// and the frame is centred inside it, never stretched.
 
 namespace {
 
@@ -111,16 +113,15 @@ struct AZVulkanHost {
     VkImageView frame_view = VK_NULL_HANDLE;
     VkImageLayout frame_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     VkFormat frame_format = VK_FORMAT_UNDEFINED;
-    VkExtent2D frame_extent = {0, 0};
     bool have_frame = false;
 
+    // Size of the image the core renders, from its reported geometry.
     unsigned source_width = 0;
     unsigned source_height = 0;
 
     std::mutex queue_mutex;
     char description[192] = {0};
     bool reported_present_error = false;
-    unsigned long long frames_presented = 0;
 };
 
 namespace {
@@ -421,8 +422,9 @@ void set_image_callback(void *handle,
     host->frame_image = image->create_info.image;
     host->frame_layout = image->image_layout;
     host->frame_format = image->create_info.format;
-    host->frame_extent = image->create_info.extent;
     host->have_frame = host->frame_image != VK_NULL_HANDLE;
+    // The image's size is not in this struct; it is the geometry the core
+    // reported, which AZVulkanHostSetSourceSize keeps current.
 }
 
 uint32_t get_sync_index_callback(void *handle) {
@@ -551,6 +553,9 @@ void AZVulkanHostSetSourceSize(AZVulkanHost *host, unsigned width, unsigned heig
     if (host == nullptr) {
         return;
     }
+    if (host->source_width != width || host->source_height != height) {
+        say("frame size now %ux%u\n", width, height);
+    }
     host->source_width = width;
     host->source_height = height;
 }
@@ -589,6 +594,16 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
         return;
     }
 
+    int32_t source_width = static_cast<int32_t>(host->source_width);
+    int32_t source_height = static_cast<int32_t>(host->source_height);
+    if (source_width <= 0 || source_height <= 0) {
+        source_width = static_cast<int32_t>(host->extent.width);
+        source_height = static_cast<int32_t>(host->extent.height);
+    }
+    if (source_width <= 0 || source_height <= 0) {
+        return;
+    }
+
     uint32_t index = 0;
     VkResult result = vkAcquireNextImageKHR(host->device, host->swapchain, UINT64_MAX,
                                             host->acquired, VK_NULL_HANDLE, &index);
@@ -601,18 +616,6 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
             host->reported_present_error = true;
             say("vkAcquireNextImageKHR failed: %s\n", result_name(result));
         }
-        return;
-    }
-
-    // The frame's own extent, not the startup geometry: both change at run time
-    // (resolution scale, screen layout) and the core re-reports them.
-    int32_t source_width = static_cast<int32_t>(host->frame_extent.width);
-    int32_t source_height = static_cast<int32_t>(host->frame_extent.height);
-    if (source_width <= 0 || source_height <= 0) {
-        source_width = static_cast<int32_t>(host->source_width);
-        source_height = static_cast<int32_t>(host->source_height);
-    }
-    if (source_width <= 0 || source_height <= 0) {
         return;
     }
 
@@ -719,8 +722,6 @@ void AZVulkanHostPresent(AZVulkanHost *host) {
     } else if (result != VK_SUCCESS && !host->reported_present_error) {
         host->reported_present_error = true;
         say("vkQueuePresentKHR failed: %s\n", result_name(result));
-    } else if (result == VK_SUCCESS) {
-        host->frames_presented += 1;
     }
 }
 
