@@ -7,6 +7,10 @@ import AVFoundation
 /// that matter are answered separately here: is the core producing anything, and
 /// is the engine consuming it. When the graph never came up, the exception that
 /// stopped it is named, with the reason AVFAudio gave.
+///
+/// The touch path is here for the same reason: it is three short stages — the tap
+/// arriving, the core asking for a pointer, the core seeing a press — and the
+/// counters say which stage is silent.
 struct AudioDiagnosticsView: View {
     @Environment(\.presentationMode) private var presentationMode
     @ObservedObject private var store = SettingsStore.shared
@@ -16,6 +20,7 @@ struct AudioDiagnosticsView: View {
     @State private var rates = Rates()
     @State private var callbacksTotal: UInt64 = 0
     @State private var baseline: Baseline?
+    @State private var touch = TouchCounters()
 
     private struct SessionInfo {
         var category = "—"
@@ -28,6 +33,12 @@ struct AudioDiagnosticsView: View {
         var callbacks: Double = 0
         var produced: Double = 0
         var consumed: Double = 0
+    }
+
+    private struct TouchCounters {
+        var taps = 0
+        var polls: UInt64 = 0
+        var pressedFrames: UInt64 = 0
     }
 
     private struct Baseline {
@@ -85,6 +96,17 @@ struct AudioDiagnosticsView: View {
                             tint: counters.dropped > 0 ? .orange : Color.white.opacity(0.85))
                     }
 
+                    SettingsCard("Touch") {
+                        row("Taps", "\(touch.taps)",
+                            tint: touch.taps > 0 ? Color.white.opacity(0.85) : .orange)
+                        row("Polls", "\(touch.polls)",
+                            tint: touch.polls > 0 ? Color.white.opacity(0.85) : .orange)
+                        row("Pressed frames", "\(touch.pressedFrames)",
+                            tint: touch.pressedFrames >= 2 ? Color.green.opacity(0.85) : .orange)
+                        hint("Tap the lower screen once and read the deltas: Taps +1, Polls above zero, Pressed frames +2 or more. Taps staying put means the tap never reached the emulator's surface. Taps moving while Polls stays put means the core is not asking for a pointer at all. Pressed frames staying put while Polls climbs means the press is not being read as one.")
+                        hint("Polls climb on their own while a game runs — the core asks up to four times a frame — so it is the change after a tap that is worth reading, not the total.")
+                    }
+
                     SettingsCard("How to read this") {
                         hint("Callbacks at 0/s means the core is not asking us for audio at all — nothing below that point can be the problem.")
                         hint("Produced/s should sit near the core rate. If it is near zero while callbacks are healthy, the core is sending silence.")
@@ -110,7 +132,7 @@ struct AudioDiagnosticsView: View {
                 Text("Audio diagnostics")
                     .font(Theme.title)
                     .foregroundColor(Theme.primaryInk)
-                Text("Live from the audio thread, twice a second")
+                Text("Live from the audio thread and the touch path, twice a second")
                     .font(Theme.subtitle)
                     .foregroundColor(Theme.secondaryInk)
             }
@@ -176,6 +198,13 @@ struct AudioDiagnosticsView: View {
         let snapshot = AudioOutput.shared.snapshot()
         counters = snapshot
         callbacksTotal = AZCoreAudioBatchCalls()
+
+        var polls: UInt64 = 0
+        var pressedFrames: UInt64 = 0
+        AZCorePointerStats(&polls, &pressedFrames)
+        touch = TouchCounters(taps: TouchSurfaceView.taps,
+                              polls: polls,
+                              pressedFrames: pressedFrames)
 
         let audioSession = AVAudioSession.sharedInstance()
         var info = SessionInfo()

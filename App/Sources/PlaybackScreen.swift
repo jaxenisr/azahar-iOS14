@@ -445,6 +445,11 @@ struct TouchSurface: UIViewRepresentable {
 }
 
 final class TouchSurfaceView: UIView {
+    /// Every tap this surface has received since launch. The touch diagnostics
+    /// read it: a tap has to land here before anything downstream can happen, so
+    /// this is the first of the three counters.
+    static private(set) var taps = 0
+
     var onTouch: ((CGFloat, CGFloat, Bool) -> Void)?
     var stacked = false
     var hinge: CGFloat = 0
@@ -462,6 +467,7 @@ final class TouchSurfaceView: UIView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
+        TouchSurfaceView.taps += 1
         activeTouch = touch
         report(touch, pressed: true)
     }
