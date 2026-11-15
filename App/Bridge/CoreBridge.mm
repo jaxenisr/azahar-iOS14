@@ -5,9 +5,11 @@
 
 #include <atomic>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "libretro.h"
 #include "libretro_vulkan.h"
@@ -39,11 +41,21 @@ bool g_game_loaded = false;
 FILE *g_log_file = nullptr;
 
 std::atomic<double> g_frame_rate{60.0};
+std::atomic<double> g_sample_rate{32728.0};
 std::atomic<unsigned long long> g_frames_delivered{0};
-std::atomic<unsigned long long> g_audio_frames{0};
+std::atomic<unsigned long long> g_audio_frames_produced{0};
+std::atomic<unsigned long long> g_audio_batch_calls{0};
+std::atomic<unsigned long long> g_audio_sample_calls{0};
 std::atomic<unsigned> g_buttons{0};
 std::atomic<int> g_circle_x{0};
 std::atomic<int> g_circle_y{0};
+// Touchscreen, already mapped to the -32767...32767 range libretro uses.
+std::atomic<int> g_pointer_x{0};
+std::atomic<int> g_pointer_y{0};
+std::atomic<bool> g_pointer_pressed{false};
+
+AZCoreAudioCallback g_audio_callback = nullptr;
+void *g_audio_context = nullptr;
 
 AZCoreFrameCallback g_frame_callback = nullptr;
 void *g_frame_context = nullptr;
@@ -255,6 +267,9 @@ bool environment_callback(unsigned cmd, void *data) {
         if (av->timing.fps > 1.0) {
             g_frame_rate.store(av->timing.fps);
         }
+        if (av->timing.sample_rate > 1000.0) {
+            g_sample_rate.store(av->timing.sample_rate);
+        }
         g_source_width = av->geometry.base_width;
         g_source_height = av->geometry.base_height;
         AZVulkanHostSetSourceSize(g_vulkan, g_source_width, g_source_height);
@@ -412,14 +427,22 @@ void video_refresh(const void *data, unsigned width, unsigned height, size_t pit
 }
 
 void audio_sample(int16_t left, int16_t right) {
-    (void)left;
-    (void)right;
-    g_audio_frames.fetch_add(1);
+    // Azahar registers this callback but never calls it; keep it correct anyway
+    // so the diagnostic can tell the two paths apart if that ever changes.
+    const int16_t frame[2] = {left, right};
+    g_audio_sample_calls.fetch_add(1);
+    g_audio_frames_produced.fetch_add(1);
+    if (g_audio_callback != nullptr) {
+        g_audio_callback(frame, 1, g_audio_context);
+    }
 }
 
 size_t audio_sample_batch(const int16_t *data, size_t frames) {
-    (void)data;
-    g_audio_frames.fetch_add(frames);
+    g_audio_batch_calls.fetch_add(1);
+    g_audio_frames_produced.fetch_add(frames);
+    if (data != nullptr && frames > 0 && g_audio_callback != nullptr) {
+        g_audio_callback(data, frames, g_audio_context);
+    }
     return frames;
 }
 
@@ -455,6 +478,23 @@ int16_t input_state_analog(unsigned port, unsigned device, unsigned index, unsig
 }
 
 int16_t input_state_combined(unsigned port, unsigned device, unsigned index, unsigned id) {
+    if (device == RETRO_DEVICE_POINTER) {
+        if (port != 0 || index != 0) {
+            return 0;
+        }
+        switch (id) {
+        case RETRO_DEVICE_ID_POINTER_PRESSED:
+            return g_pointer_pressed.load() ? 1 : 0;
+        case RETRO_DEVICE_ID_POINTER_COUNT:
+            return g_pointer_pressed.load() ? 1 : 0;
+        case RETRO_DEVICE_ID_POINTER_X:
+            return static_cast<int16_t>(g_pointer_x.load());
+        case RETRO_DEVICE_ID_POINTER_Y:
+            return static_cast<int16_t>(g_pointer_y.load());
+        default:
+            return 0;
+        }
+    }
     if (device == RETRO_DEVICE_ANALOG) {
         return input_state_analog(port, device, index, id);
     }
@@ -693,6 +733,9 @@ BOOL AZCoreLoadGame(NSString *path) {
     if (av.timing.fps > 1.0) {
         g_frame_rate.store(av.timing.fps);
     }
+    if (av.timing.sample_rate > 1000.0) {
+        g_sample_rate.store(av.timing.sample_rate);
+    }
     g_source_width = av.geometry.base_width;
     g_source_height = av.geometry.base_height;
     AZVulkanHostSetSourceSize(g_vulkan, g_source_width, g_source_height);
@@ -768,4 +811,94 @@ const char *AZCoreRendererName(void) {
 
 BOOL AZCoreUsesHardwareVideo(void) {
     return g_vulkan != nullptr ? YES : NO;
+}
+
+void AZCoreSetPointer(float x, float y, BOOL pressed) {
+    // libretro's pointer lives on a -32767...32767 square; the core scales it to
+    // the composite frame and then to the bottom screen rect itself.
+    float clampedX = x < -1.5f ? -1.5f : (x > 1.5f ? 1.5f : x);
+    float clampedY = y < -1.5f ? -1.5f : (y > 1.5f ? 1.5f : y);
+    g_pointer_x.store(static_cast<int>(clampedX * 32767.0f));
+    g_pointer_y.store(static_cast<int>(clampedY * 32767.0f));
+    g_pointer_pressed.store(pressed != NO);
+}
+
+void AZCoreSetAudioCallback(AZCoreAudioCallback callback, void *context) {
+    g_audio_callback = callback;
+    g_audio_context = context;
+}
+
+double AZCoreSampleRate(void) {
+    return g_sample_rate.load();
+}
+
+unsigned long long AZCoreAudioBatchCalls(void) {
+    return g_audio_batch_calls.load();
+}
+
+unsigned long long AZCoreAudioFramesProduced(void) {
+    return g_audio_frames_produced.load();
+}
+
+size_t AZCoreSerializeSize(void) {
+    if (!g_game_loaded) {
+        return 0;
+    }
+    return retro_serialize_size();
+}
+
+BOOL AZCoreSaveState(NSString *path) {
+    if (!g_game_loaded) {
+        g_last_error = "no content is loaded";
+        return NO;
+    }
+    const size_t size = retro_serialize_size();
+    if (size == 0) {
+        g_last_error = "the core cannot serialise this content";
+        return NO;
+    }
+    std::vector<uint8_t> buffer(size);
+    if (!retro_serialize(buffer.data(), size)) {
+        g_last_error = "the core refused to write a save state";
+        return NO;
+    }
+    NSData *data = [NSData dataWithBytes:buffer.data() length:size];
+    NSError *error = nil;
+    const BOOL written = [data writeToFile:path options:NSDataWritingAtomic error:&error];
+    if (!written) {
+        g_last_error = error.localizedDescription.UTF8String ?: "the save state could not be written";
+        return NO;
+    }
+    char note[160];
+    std::snprintf(note, sizeof(note), "save state written: %zu bytes\n", size);
+    write_log("info", note);
+    return YES;
+}
+
+BOOL AZCoreLoadState(NSString *path) {
+    if (!g_game_loaded) {
+        g_last_error = "no content is loaded";
+        return NO;
+    }
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (data == nil) {
+        g_last_error = "there is no save state for this title yet";
+        return NO;
+    }
+    const size_t size = retro_serialize_size();
+    if (size != 0 && data.length != size) {
+        g_last_error = "the save state does not match this content";
+        return NO;
+    }
+    if (!retro_unserialize(data.bytes, data.length)) {
+        g_last_error = "the core refused this save state";
+        return NO;
+    }
+    write_log("info", "save state restored\n");
+    return YES;
+}
+
+CGSize AZCoreSourceSize(void) {
+    return CGSizeMake(static_cast<CGFloat>(g_source_width),
+                      static_cast<CGFloat>(g_source_height));
 }
