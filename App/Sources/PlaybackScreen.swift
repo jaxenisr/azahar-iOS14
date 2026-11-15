@@ -14,6 +14,7 @@ struct PlaybackScreen: View {
     @ObservedObject private var controllers = ControllerMonitor.shared
     @Environment(\.presentationMode) private var presentationMode
     @State private var showsOverlay = true
+    @State private var showsDiagnostics = false
 
     private var settings: EmulationSettings { store.global.emulation }
 
@@ -88,6 +89,19 @@ struct PlaybackScreen: View {
         .onChange(of: settings.isMuted) { value in
             AudioOutput.shared.setMuted(value)
         }
+        .sheet(isPresented: $showsDiagnostics) {
+            AudioDiagnosticsView()
+        }
+    }
+
+    /// Set when the audio graph refused to build. A silent game that says why is
+    /// better than a silent game that looks broken.
+    private var audioFailure: String? {
+        let counters = AudioOutput.shared.snapshot()
+        guard !counters.available else { return nil }
+        let name = counters.failureName ?? "audio unavailable"
+        let reason = counters.failureReason ?? ""
+        return "audio off · \(name): \(reason)"
     }
 
     private func controlSetup(metrics: ControlMetrics,
@@ -205,6 +219,14 @@ struct PlaybackScreen: View {
             Divider().background(Color.green.opacity(0.25)).padding(.vertical, 2)
 
             statistic("Audio", session.audio.state)
+            if let failure = audioFailure {
+                Text(failure)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 258, alignment: .leading)
+                    .padding(.bottom, 2)
+            }
             statistic("Audio cbs", String(format: "%.1f/s · batch", session.audio.batchCallbacksPerSecond))
             statistic("Audio made", String(format: "%.0f/s · %.0f Hz", session.audio.producedPerSecond, session.audio.coreSampleRate))
             statistic("Audio used", String(format: "%.0f/s", session.audio.consumedPerSecond))
@@ -216,6 +238,7 @@ struct PlaybackScreen: View {
             HStack(spacing: 6) {
                 statisticButton("Save state") { session.saveState() }
                 statisticButton("Load state") { session.loadState() }
+                statisticButton("Diagnostics") { showsDiagnostics = true }
             }
             .padding(.top, 4)
         }
