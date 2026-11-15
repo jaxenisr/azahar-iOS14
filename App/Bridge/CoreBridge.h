@@ -57,8 +57,48 @@ FOUNDATION_EXPORT unsigned long long AZCoreFramesDelivered(void);
 /// libretro joystick state: bit N is RETRO_DEVICE_ID_JOYPAD_* button N.
 FOUNDATION_EXPORT void AZCoreSetButtons(unsigned mask);
 
-/// Circle pad, each axis in -32768...32767.
+/// Circle pad, each axis in -32768...32767, Y positive downwards (the core
+/// negates it when it reads the analog device).
 FOUNDATION_EXPORT void AZCoreSetCirclePad(int x, int y);
+
+/// Touchscreen position in frame coordinates: x is -1 at the left edge and 1 at
+/// the right, y is -1 at the top and 1 at the bottom. The core maps that onto
+/// the bottom screen for whichever layout is active, so this frontend never has
+/// to know where the bottom screen sits.
+FOUNDATION_EXPORT void AZCoreSetPointer(float x, float y, BOOL pressed);
+
+/// Audio the core produces, handed over as interleaved stereo int16 frames. The
+/// pointer is only valid for the duration of the call. Azahar drives this from
+/// audio_sample_batch only: it registers audio_sample but never calls it.
+typedef void (*AZCoreAudioCallback)(const int16_t *_Nullable frames,
+                                    size_t frameCount,
+                                    void *_Nullable context);
+
+FOUNDATION_EXPORT void AZCoreSetAudioCallback(AZCoreAudioCallback _Nullable callback,
+                                              void *_Nullable context);
+
+/// Sample rate the content asked for, in Hz (Azahar's audio core runs at 32728
+/// for every title, but the number comes from the core, not from here).
+FOUNDATION_EXPORT double AZCoreSampleRate(void);
+
+/// How many audio_sample_batch calls and stereo frames the core has produced.
+/// The first number answers "is the core calling us at all", the second "how
+/// much sound it thinks it has made".
+FOUNDATION_EXPORT unsigned long long AZCoreAudioBatchCalls(void);
+FOUNDATION_EXPORT unsigned long long AZCoreAudioFramesProduced(void);
+
+/// Size in bytes of one save state, or 0 when the core cannot serialise this
+/// content. Must be called on the emulation thread while a game is loaded.
+FOUNDATION_EXPORT size_t AZCoreSerializeSize(void);
+
+/// Writes / restores one save state. Emulation thread only, game loaded.
+FOUNDATION_EXPORT BOOL AZCoreSaveState(NSString *path);
+FOUNDATION_EXPORT BOOL AZCoreLoadState(NSString *path);
+
+/// Size of the frame the core currently produces, in its own pixels. The present
+/// path letterboxes this into the drawable, and touch input is normalised over
+/// the same rectangle.
+FOUNDATION_EXPORT CGSize AZCoreSourceSize(void);
 
 /// Most recent message the core wanted to show, or nil.
 FOUNDATION_EXPORT NSString *_Nullable AZCoreLastMessage(void);
