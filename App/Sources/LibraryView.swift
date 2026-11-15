@@ -18,6 +18,14 @@ enum LibraryMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// One letter of the library, so `ForEach` has something to identify.
+private struct LibrarySection: Identifiable {
+    let letter: String
+    let games: [GameEntry]
+
+    var id: String { letter }
+}
+
 struct LibraryView: View {
     @EnvironmentObject private var library: GameLibrary
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -39,7 +47,7 @@ struct LibraryView: View {
     /// Titles bucketed by their first letter, in alphabetical order, with anything
     /// that does not start with a letter under `#`. This is what makes a large
     /// library scannable.
-    private var sections: [(letter: String, games: [GameEntry])] {
+    private var sections: [LibrarySection] {
         var buckets: [String: [GameEntry]] = [:]
         for game in library.games {
             let first = game.title.first.map { String($0).uppercased() } ?? "#"
@@ -47,10 +55,10 @@ struct LibraryView: View {
             buckets[key, default: []].append(game)
         }
         return buckets.keys.sorted().map { key in
-            (letter: key,
-             games: (buckets[key] ?? []).sorted {
-                 $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-             })
+            LibrarySection(letter: key,
+                           games: (buckets[key] ?? []).sorted {
+                               $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                           })
         }
     }
 
@@ -195,7 +203,7 @@ struct LibraryView: View {
     private var gameGrid: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Design.Space.xl) {
-                ForEach(sections, id: \.letter) { section in
+                ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: Design.Space.s) {
                         Text(section.letter)
                             .font(Design.Fonts.section)
@@ -324,10 +332,7 @@ struct LibraryView: View {
                                 if let game = game { openDetail(game) }
                             },
                             .destructive(Text("Remove from library")) {
-                                if let game = game, let url = Optional(game.url) {
-                                    _ = url
-                                    library.remove(game)
-                                }
+                                if let game = game { library.remove(game) }
                             },
                             .cancel()
                            ])
