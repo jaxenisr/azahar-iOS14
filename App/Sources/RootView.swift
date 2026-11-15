@@ -296,76 +296,78 @@ struct EmulationView: View {
                 ScreenHeader(title: "Emulation",
                              subtitle: "Defaults for every title. A title can override these from its own page.")
 
-                SettingsCard("Graphics") {
-                    SettingRow("Resolution scale", subtitle: "Applied when playback starts") {
-                        SegmentedRow(options: ["1x", "2x", "3x", "4x"],
-                                     selection: settings.clampedResolution - 1) { index in
-                            store.updateGlobal { $0.resolutionScale = index + 1 }
+                column {
+                    SettingsCard("Graphics") {
+                        SettingRow("Resolution scale", subtitle: "Applied when playback starts") {
+                            SegmentedRow(options: ["1x", "2x", "3x", "4x"],
+                                         selection: settings.clampedResolution - 1) { index in
+                                store.updateGlobal { $0.resolutionScale = index + 1 }
+                            }
+                        }
+                        RowDivider()
+                        SettingRow("Screen layout", subtitle: "How the two screens are composed") {
+                            SegmentedRow(options: PlaybackLayout.allCases.map { $0.title },
+                                         selection: PlaybackLayout.allCases.firstIndex(of: settings.layout) ?? 0) { index in
+                                store.updateGlobal { $0.layout = PlaybackLayout.allCases[index] }
+                            }
                         }
                     }
-                    RowDivider()
-                    SettingRow("Screen layout", subtitle: "How the two screens are composed") {
-                        SegmentedRow(options: PlaybackLayout.allCases.map { $0.title },
-                                     selection: PlaybackLayout.allCases.firstIndex(of: settings.layout) ?? 0) { index in
-                            store.updateGlobal { $0.layout = PlaybackLayout.allCases[index] }
-                        }
-                    }
-                }
 
-                SettingsCard("Performance") {
-                    SettingRow("Emulation speed",
-                               subtitle: "How fast playback runs, against real time") {
-                        SegmentedRow(options: PlaybackSpeed.allCases.map { $0.title },
-                                     selection: PlaybackSpeed.allCases.firstIndex(of: settings.speed) ?? 2) { index in
-                            store.updateGlobal { $0.speed = PlaybackSpeed.allCases[index] }
+                    SettingsCard("Performance") {
+                        SettingRow("Emulation speed",
+                                   subtitle: "How fast playback runs, against real time") {
+                            SegmentedRow(options: PlaybackSpeed.allCases.map { $0.title },
+                                         selection: PlaybackSpeed.allCases.firstIndex(of: settings.speed) ?? 2) { index in
+                                store.updateGlobal { $0.speed = PlaybackSpeed.allCases[index] }
+                            }
+                        }
+                        RowDivider()
+                        SettingRow("3DS CPU clock",
+                                   subtitle: "How fast the emulated CPU runs. A separate setting: higher does not make playback faster, it makes the emulated machine faster") {
+                            SegmentedRow(options: EmulationSettings.cpuClockChoices.map { "\($0)%" },
+                                         selection: EmulationSettings.cpuClockChoices.firstIndex(of: settings.clampedClock) ?? 3) { index in
+                                store.updateGlobal { $0.cpuClockPercent = EmulationSettings.cpuClockChoices[index] }
+                            }
                         }
                     }
-                    RowDivider()
-                    SettingRow("3DS CPU clock",
-                               subtitle: "How fast the emulated CPU runs. A separate setting: higher does not make playback faster, it makes the emulated machine faster") {
-                        SegmentedRow(options: EmulationSettings.cpuClockChoices.map { "\($0)%" },
-                                     selection: EmulationSettings.cpuClockChoices.firstIndex(of: settings.clampedClock) ?? 3) { index in
-                            store.updateGlobal { $0.cpuClockPercent = EmulationSettings.cpuClockChoices[index] }
-                        }
-                    }
-                }
 
-                SettingsCard("Audio") {
-                    SettingRow("Volume", subtitle: "Applies immediately, even mid-game") {
-                        ValueSlider(value: settings.volume,
-                                    range: 0...1,
-                                    text: "\(Int(settings.volume * 100))%") { value in
-                            store.updateGlobal { $0.volume = value }
+                    SettingsCard("Audio") {
+                        SettingRow("Volume", subtitle: "Applies immediately, even mid-game") {
+                            ValueSlider(value: settings.volume,
+                                        range: 0...1,
+                                        text: "\(Int(settings.volume * 100))%") { value in
+                                store.updateGlobal { $0.volume = value }
+                            }
+                        }
+                        RowDivider()
+                        SettingRow("Mute") {
+                            SettingsToggle(isOn: settings.isMuted) { value in
+                                store.updateGlobal { $0.isMuted = value }
+                            }
                         }
                     }
-                    RowDivider()
-                    SettingRow("Mute") {
-                        SettingsToggle(isOn: settings.isMuted) { value in
-                            store.updateGlobal { $0.isMuted = value }
-                        }
-                    }
-                }
 
-                SettingsCard("Controls") {
-                    SettingRow("Opacity") {
-                        ValueSlider(value: settings.clampedOpacity,
-                                    range: 0.25...1,
-                                    text: "\(Int(settings.clampedOpacity * 100))%") { value in
-                            store.updateGlobal { $0.controlsOpacity = value }
+                    SettingsCard("Controls") {
+                        SettingRow("Opacity") {
+                            ValueSlider(value: settings.clampedOpacity,
+                                        range: 0.25...1,
+                                        text: "\(Int(settings.clampedOpacity * 100))%") { value in
+                                store.updateGlobal { $0.controlsOpacity = value }
+                            }
                         }
-                    }
-                    RowDivider()
-                    SettingRow("Size") {
-                        ValueSlider(value: settings.clampedScale,
-                                    range: 0.7...1.35,
-                                    text: "\(Int(settings.clampedScale * 100))%") { value in
-                            store.updateGlobal { $0.controlsScale = value }
+                        RowDivider()
+                        SettingRow("Size") {
+                            ValueSlider(value: settings.clampedScale,
+                                        range: 0.7...1.35,
+                                        text: "\(Int(settings.clampedScale * 100))%") { value in
+                                store.updateGlobal { $0.controlsScale = value }
+                            }
                         }
-                    }
-                    RowDivider()
-                    SettingRow("Haptics") {
-                        SettingsToggle(isOn: settings.hapticsEnabled) { value in
-                            store.updateGlobal { $0.hapticsEnabled = value }
+                        RowDivider()
+                        SettingRow("Haptics") {
+                            SettingsToggle(isOn: settings.hapticsEnabled) { value in
+                                store.updateGlobal { $0.hapticsEnabled = value }
+                            }
                         }
                     }
                 }
@@ -373,6 +375,15 @@ struct EmulationView: View {
             // Room for the compact bar when the page scrolls under it.
             .padding(.bottom, Design.Space.xxl * 3)
         }
+    }
+
+    /// One column, side margins, and a cap so rows do not stretch across ten
+    /// inches. The header keeps its own margins, so it sits outside this.
+    private func column<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, Design.Space.sideMargin)
     }
 }
 
@@ -390,67 +401,67 @@ struct AppSettingsView: View {
             VStack(alignment: .leading, spacing: Design.Space.l) {
                 ScreenHeader(title: "Settings", subtitle: "System files, storage and the core")
 
-                SettingsCard("System files") {
-                    ForEach(library.coreFileStatus()) { status in
-                        HStack(alignment: .top, spacing: Design.Space.s) {
-                            Image(systemName: status.present ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundColor(status.present ? Design.Palette.positive : Color.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(status.id)
-                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                    .foregroundColor(Design.Palette.ink)
-                                Text(status.present ? status.note : "missing · \(status.note)")
-                                    .font(Design.Fonts.caption)
-                                    .foregroundColor(status.present ? Design.Palette.secondaryInk : Color.orange)
+                VStack(alignment: .leading, spacing: Design.Space.l) {
+                    SettingsCard("System files") {
+                        ForEach(library.coreFileStatus()) { status in
+                            HStack(alignment: .top, spacing: Design.Space.s) {
+                                Image(systemName: status.present ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(status.present ? Design.Palette.positive : Color.orange)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(status.id)
+                                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Design.Palette.ink)
+                                    Text(status.present ? status.note : "missing · \(status.note)")
+                                        .font(Design.Fonts.caption)
+                                        .foregroundColor(status.present ? Design.Palette.secondaryInk : Color.orange)
+                                }
+                                Spacer(minLength: 0)
                             }
-                            Spacer(minLength: 0)
+                            .padding(.vertical, 2)
                         }
-                        .padding(.vertical, 2)
                     }
-                }
 
-                SettingsCard("Storage") {
-                    storageRow("ROMs", usage.romsBytes)
-                    storageRow("Save data", usage.saveDataBytes)
-                    storageRow("Save states", usage.stateBytes)
-                    storageRow("Shader cache", usage.cacheBytes)
-                    RowDivider()
-                    storageRow("Total", usage.totalBytes)
+                    SettingsCard("Storage") {
+                        storageRow("ROMs", usage.romsBytes)
+                        storageRow("Save data", usage.saveDataBytes)
+                        storageRow("Save states", usage.stateBytes)
+                        storageRow("Shader cache", usage.cacheBytes)
+                        RowDivider()
+                        storageRow("Total", usage.totalBytes)
 
-                    Button(action: { showsCacheAlert = true }) {
-                        Text("Clear shader cache")
-                            .font(Design.Fonts.caption.weight(.semibold))
-                            .foregroundColor(Design.Palette.ink)
-                            .padding(.horizontal, Design.Space.m)
-                            .frame(height: 36)
-                            .background(Capsule().fill(Design.Palette.card))
-                            .overlay(Capsule().stroke(Design.Palette.hairline, lineWidth: 1))
-                            .contentShape(Capsule())
+                        Button(action: { showsCacheAlert = true }) {
+                            Text("Clear shader cache")
+                                .font(Design.Fonts.caption.weight(.semibold))
+                                .foregroundColor(Design.Palette.ink)
+                                .padding(.horizontal, Design.Space.m)
+                                .frame(height: 36)
+                                .background(Capsule().fill(Design.Palette.card))
+                                .overlay(Capsule().stroke(Design.Palette.hairline, lineWidth: 1))
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressableStyle())
+                        .padding(.top, Design.Space.xxs)
                     }
-                    .buttonStyle(PressableStyle())
-                    .padding(.top, Design.Space.xxs)
-                }
 
-                SettingsCard("About") {
-                    SettingRow("Core") {
-                        Text(library.coreDescription)
-                            .font(.system(size: 13, design: .monospaced))
+                    SettingsCard("About") {
+                        SettingRow("Core") {
+                            Text(library.coreDescription)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(Design.Palette.secondaryInk)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Text("3DS emulation powered by Azahar · GPLv3\nFrontend for iPadOS 14.")
+                            .font(Design.Fonts.caption)
                             .foregroundColor(Design.Palette.secondaryInk)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text("3DS emulation powered by Azahar · GPLv3\nFrontend for iPadOS 14.")
-                        .font(Design.Fonts.caption)
-                        .foregroundColor(Design.Palette.secondaryInk)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                // The max width keeps settings from stretching across ten inches.
-                EmptyView()
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, Design.Space.sideMargin)
             }
-            .frame(maxWidth: 720, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.bottom, Design.Space.xxl * 3)
         }
         .onAppear(perform: refreshUsage)
