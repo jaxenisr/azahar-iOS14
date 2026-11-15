@@ -266,15 +266,34 @@ final class ThumbstickView: UIControl {
     }
 }
 
-/// The whole control surface. It only answers touches that land on a control, so
-/// a finger on the game image still reaches the touchscreen underneath.
+/// The whole input surface: the touchscreen, with the controls drawn above it.
+/// It answers touches that land on a control or on the picture and reports the
+/// rest as not its own, so whatever is behind still gets them.
+///
+/// Both live in one view on purpose. A touch falls through to a view *behind*
+/// another only when the two are subviews of the same superview: the hit test
+/// then skips the branch that says no and keeps looking. Two hosted views stacked
+/// as separate SwiftUI children do not do that, because the upper child wins
+/// SwiftUI's hit test before UIKit is asked anything, and the touch is dispatched
+/// into it and dropped. That is how a full screen overlay could sit over the
+/// picture, find no control under the finger, and never let the touch reach the
+/// touchscreen one layer below.
 ///
 /// The frames arrive ready-made from `PlaybackGeometry`: this view draws and
 /// reports, it does not decide where anything goes.
-final class OnScreenControlsView: UIView {
+final class PlaybackInputView: UIView {
     struct Setup {
         var opacity: CGFloat = 0.9
         var haptics = true
+        /// Where the picture is, in this view's coordinates. The touchscreen is
+        /// exactly this rect, so a finger on the game is a point on the core's
+        /// frame and nowhere else.
+        var image = CGRect.zero
+        var stacked = false
+        var hinge: CGFloat = 0
+        /// False while a controller is connected: only the buttons go away, the
+        /// picture stays touchable.
+        var showsControls = true
         var button: CGFloat = 52
         var offset: CGFloat = 48
         var stick = CGRect.zero
@@ -288,7 +307,11 @@ final class OnScreenControlsView: UIView {
 
     var onButton: ((UInt32, Bool) -> Void)?
     var onStick: ((CGFloat, CGFloat) -> Void)?
+    var onTouch: ((CGFloat, CGFloat, Bool) -> Void)? {
+        didSet { touchView.onTouch = onTouch }
+    }
 
+    private let touchView = TouchSurfaceView()
     private let haptics = Haptics()
     private var setup = Setup()
 
@@ -317,6 +340,9 @@ final class OnScreenControlsView: UIView {
         backgroundColor = .clear
         isMultipleTouchEnabled = true
 
+        // The touchscreen goes in first, so the controls are drawn — and hit
+        // tested — above it wherever they overlap.
+        addSubview(touchView)
         addSubview(stick)
         for view in allButtons {
             addSubview(view)
@@ -362,13 +388,23 @@ final class OnScreenControlsView: UIView {
         self.setup = setup
         alpha = setup.opacity
         haptics.isEnabled = setup.haptics
-        isHidden = false
+        touchView.onTouch = onTouch
+        touchView.stacked = setup.stacked
+        touchView.hinge = setup.hinge
+        touchView.isUserInteractionEnabled = true
+        touchView.isHidden = false
+        var controls: [UIView] = allButtons
+        controls.append(stick)
+        for control in controls {
+            control.isHidden = !setup.showsControls
+        }
         setNeedsLayout()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
 
+        touchView.frame = setup.image
         stick.frame = setup.stick
         shoulderL.frame = setup.shoulderL
         shoulderR.frame = setup.shoulderR
@@ -404,32 +440,45 @@ final class OnScreenControlsView: UIView {
         }
     }
 
-    /// Only the controls themselves take touches, each with a generous margin;
-    /// everything else falls through to the game surface, where the bottom
-    /// screen is.
+    /// The picture and the controls take touches: the controls with a generous
+    /// margin, the picture exactly. Everything else is not ours, and saying so
+    /// here is what lets the touch carry on behind this view.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        for view in subviews where !view.isHidden && view.alpha > 0.05 {
+        if !touchView.isHidden && touchView.frame.contains(point) { return true }
+        for view in subviews where view !== touchView && !view.isHidden && view.alpha > 0.05 {
             if view.frame.insetBy(dx: -6, dy: -6).contains(point) { return true }
         }
         return false
     }
+
+    /// `hitTest` answers with the view itself when the point is inside it but no
+    /// subview claims it. That is the empty space around the picture, and
+    /// swallowing a touch there is precisely the bug this view exists to end, so
+    /// it is reported as no hit at all.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === self ? nil : hit
+    }
 }
 
-/// Wraps the UIKit controls for SwiftUI and keeps their configuration current.
-struct ControlsOverlay: UIViewRepresentable {
-    let setup: OnScreenControlsView.Setup
+/// Wraps the UIKit input surface for SwiftUI and keeps its configuration current.
+struct PlaybackInput: UIViewRepresentable {
+    let setup: PlaybackInputView.Setup
+    let onTouch: (CGFloat, CGFloat, Bool) -> Void
     let onButton: (UInt32, Bool) -> Void
     let onStick: (CGFloat, CGFloat) -> Void
 
-    func makeUIView(context: Context) -> OnScreenControlsView {
-        let view = OnScreenControlsView()
+    func makeUIView(context: Context) -> PlaybackInputView {
+        let view = PlaybackInputView()
+        view.onTouch = onTouch
         view.onButton = onButton
         view.onStick = onStick
         view.apply(setup)
         return view
     }
 
-    func updateUIView(_ view: OnScreenControlsView, context: Context) {
+    func updateUIView(_ view: PlaybackInputView, context: Context) {
+        view.onTouch = onTouch
         view.onButton = onButton
         view.onStick = onStick
         view.apply(setup)

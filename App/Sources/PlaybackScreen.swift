@@ -52,27 +52,30 @@ struct PlaybackScreen: View {
             ZStack(alignment: .topLeading) {
                 Color.black
 
+                // Reports which view won hit testing for each touch. It is not a
+                // view in the way: the audit is a recogniser on the window, so it
+                // sees every touch without taking one.
+                TouchAuditProbe()
+                    .frame(width: 1, height: 1)
+
                 surface
                     .frame(width: metrics.image.width, height: metrics.image.height)
                     .offset(x: metrics.image.minX, y: metrics.image.minY)
 
-                TouchSurface(stacked: session.layout == .stacked,
-                             hinge: PlaybackLayout.stackedHinge) { x, y, pressed in
-                    session.setPointer(x: x, y: y, pressed: pressed)
-                }
-                .frame(width: metrics.image.width, height: metrics.image.height)
-                .offset(x: metrics.image.minX, y: metrics.image.minY)
-
-                if !controllers.isConnected {
-                    ControlsOverlay(setup: controlSetup(metrics),
-                                    onButton: { mask, pressed in
-                                        session.setButton(mask, pressed: pressed)
-                                    },
-                                    onStick: { x, y in
-                                        session.setCirclePad(x: Int(x * 32767), y: Int(y * 32767))
-                                    })
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                }
+                // One hosted view for the touchscreen and the controls. Two of
+                // them would put a full screen layer over the picture, and the
+                // upper layer takes the touch before the one below is ever asked.
+                PlaybackInput(setup: inputSetup(metrics),
+                              onTouch: { x, y, pressed in
+                                  session.setPointer(x: x, y: y, pressed: pressed)
+                              },
+                              onButton: { mask, pressed in
+                                  session.setButton(mask, pressed: pressed)
+                              },
+                              onStick: { x, y in
+                                  session.setCirclePad(x: Int(x * 32767), y: Int(y * 32767))
+                              })
+                    .frame(width: geometry.size.width, height: geometry.size.height)
 
                 if case .failed(let reason) = session.phase {
                     failure(reason)
@@ -81,6 +84,9 @@ struct PlaybackScreen: View {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                         .frame(width: geometry.size.width, height: geometry.size.height)
+                        // A spinner must never be able to take a touch from the
+                        // surface it is drawn over.
+                        .allowsHitTesting(false)
                 }
 
                 hud(metrics)
@@ -126,9 +132,13 @@ struct PlaybackScreen: View {
         return "audio off · \(name): \(reason)"
     }
 
-    private func controlSetup(_ metrics: PlaybackGeometry) -> OnScreenControlsView.Setup {
-        var setup = OnScreenControlsView.Setup()
+    private func inputSetup(_ metrics: PlaybackGeometry) -> PlaybackInputView.Setup {
+        var setup = PlaybackInputView.Setup()
         setup.opacity = CGFloat(settings.clampedOpacity)
+        setup.image = metrics.image
+        setup.stacked = session.layout == .stacked
+        setup.hinge = PlaybackLayout.stackedHinge
+        setup.showsControls = !controllers.isConnected
         setup.haptics = settings.hapticsEnabled
         setup.button = metrics.button
         setup.offset = metrics.offset
@@ -421,29 +431,9 @@ final class FrameContainerView: UIView {
     }
 }
 
-/// The bottom screen is a touchscreen. The core maps a normalised pointer onto the
-/// bottom screen itself, so this only has to say where the finger is inside the
-/// frame the core is producing.
-struct TouchSurface: UIViewRepresentable {
-    var stacked: Bool = false
-    var hinge: CGFloat = 0
-    let onTouch: (CGFloat, CGFloat, Bool) -> Void
-
-    func makeUIView(context: Context) -> TouchSurfaceView {
-        let view = TouchSurfaceView()
-        view.onTouch = onTouch
-        view.stacked = stacked
-        view.hinge = hinge
-        return view
-    }
-
-    func updateUIView(_ view: TouchSurfaceView, context: Context) {
-        view.onTouch = onTouch
-        view.stacked = stacked
-        view.hinge = hinge
-    }
-}
-
+/// The bottom screen. The core maps a normalised pointer onto the bottom screen
+/// itself, so this only has to say where the finger is inside the frame the core
+/// is producing.
 final class TouchSurfaceView: UIView {
     /// Every tap this surface has received since launch. The touch diagnostics
     /// read it: a tap has to land here before anything downstream can happen, so
@@ -454,11 +444,26 @@ final class TouchSurfaceView: UIView {
     var stacked = false
     var hinge: CGFloat = 0
     private var activeTouch: UITouch?
+    /// The dot drawn where the finger landed, so a tap that goes nowhere is still
+    /// visible on the screen it was made on.
+    private let marker = CAShapeLayer()
+    private var markerGeneration = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         isMultipleTouchEnabled = true
+
+        marker.fillColor = UIColor.red.withAlphaComponent(0.85).cgColor
+        marker.strokeColor = UIColor.white.withAlphaComponent(0.9).cgColor
+        marker.lineWidth = 2
+        marker.opacity = 0
+        layer.addSublayer(marker)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        marker.frame = bounds
     }
 
     required init?(coder: NSCoder) {
@@ -469,6 +474,9 @@ final class TouchSurfaceView: UIView {
         guard let touch = touches.first else { return }
         TouchSurfaceView.taps += 1
         activeTouch = touch
+        let point = touch.location(in: self)
+        TouchLog.write("down \(Int(point.x)),\(Int(point.y)) in \(Int(bounds.width))x\(Int(bounds.height)) stacked=\(stacked)")
+        showMarker(at: point)
         report(touch, pressed: true)
     }
 
@@ -488,7 +496,26 @@ final class TouchSurfaceView: UIView {
     private func finish(_ touches: Set<UITouch>) {
         guard let touch = activeTouch, touches.contains(touch) else { return }
         activeTouch = nil
+        TouchLog.write("up")
         onTouch?(0, 0, false)
+    }
+
+    /// A red dot under the finger for four tenths of a second. It outlives the
+    /// touch on purpose: a tap can be shorter than a frame and still happen, so
+    /// the mark has to be readable after the finger is gone.
+    private func showMarker(at point: CGPoint) {
+        let radius: CGFloat = 16
+        marker.path = UIBezierPath(ovalIn: CGRect(x: point.x - radius,
+                                                  y: point.y - radius,
+                                                  width: radius * 2,
+                                                  height: radius * 2)).cgPath
+        marker.opacity = 1
+        markerGeneration += 1
+        let generation = markerGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self = self, self.markerGeneration == generation else { return }
+            self.marker.opacity = 0
+        }
     }
 
     /// The view's frame is already the picture's rect, so a touch maps straight
