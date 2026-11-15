@@ -52,7 +52,17 @@ std::atomic<int> g_circle_y{0};
 // Touchscreen, already mapped to the -32767...32767 range libretro uses.
 std::atomic<int> g_pointer_x{0};
 std::atomic<int> g_pointer_y{0};
-std::atomic<bool> g_pointer_pressed{false};
+// The finger is down; set and cleared by the frontend.
+std::atomic<bool> g_pointer_down{false};
+// Frames still to report a press. The core samples input once per retro_run, so a
+// tap shorter than a frame would otherwise be invisible to it.
+std::atomic<int> g_pointer_hold{0};
+// The core read a press during the frame that is running now.
+std::atomic<bool> g_pointer_seen{false};
+std::atomic<unsigned long long> g_pointer_polls{0};
+std::atomic<unsigned long long> g_pointer_pressed_frames{0};
+
+constexpr int kPointerHoldFrames = 3;
 
 AZCoreAudioCallback g_audio_callback = nullptr;
 void *g_audio_context = nullptr;
@@ -477,16 +487,26 @@ int16_t input_state_analog(unsigned port, unsigned device, unsigned index, unsig
     return 0;
 }
 
+bool pointer_pressed() {
+    return g_pointer_down.load() || g_pointer_hold.load() > 0;
+}
+
 int16_t input_state_combined(unsigned port, unsigned device, unsigned index, unsigned id) {
     if (device == RETRO_DEVICE_POINTER) {
         if (port != 0 || index != 0) {
             return 0;
         }
+        // The core asks four times a frame while a game runs, so this is the
+        // counter that says whether the pointer path is being used at all.
+        g_pointer_polls.fetch_add(1);
+        const bool pressed = pointer_pressed();
         switch (id) {
         case RETRO_DEVICE_ID_POINTER_PRESSED:
-            return g_pointer_pressed.load() ? 1 : 0;
         case RETRO_DEVICE_ID_POINTER_COUNT:
-            return g_pointer_pressed.load() ? 1 : 0;
+            if (pressed) {
+                g_pointer_seen.store(true);
+            }
+            return pressed ? 1 : 0;
         case RETRO_DEVICE_ID_POINTER_X:
             return static_cast<int16_t>(g_pointer_x.load());
         case RETRO_DEVICE_ID_POINTER_Y:
@@ -702,7 +722,12 @@ BOOL AZCoreLoadGame(NSString *path) {
         return NO;
     }
 
+    // One device per port in libretro, so the touchscreen is declared after the
+    // joypad. This core ignores both: retro_set_controller_port_device is an empty
+    // function and its input is read through input_state_cb regardless of what was
+    // declared, so the buttons are unaffected either way.
     retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    retro_set_controller_port_device(0, RETRO_DEVICE_POINTER);
 
     // With a hardware renderer the core deliberately does not load the content in
     // retro_load_game: it waits until the frontend has a context, then loads inside
@@ -753,6 +778,16 @@ void AZCoreRunFrame(void) {
         return;
     }
     retro_run();
+
+    // One frame is over, so the core has sampled input. A press it saw during that
+    // frame counts, and the hold that keeps a quick tap visible gives up a frame.
+    if (g_pointer_seen.exchange(false)) {
+        g_pointer_pressed_frames.fetch_add(1);
+    }
+    const int hold = g_pointer_hold.load();
+    if (hold > 0) {
+        g_pointer_hold.store(hold - 1);
+    }
 }
 
 void AZCoreUnloadGame(void) {
@@ -820,7 +855,22 @@ void AZCoreSetPointer(float x, float y, BOOL pressed) {
     float clampedY = y < -1.5f ? -1.5f : (y > 1.5f ? 1.5f : y);
     g_pointer_x.store(static_cast<int>(clampedX * 32767.0f));
     g_pointer_y.store(static_cast<int>(clampedY * 32767.0f));
-    g_pointer_pressed.store(pressed != NO);
+    if (pressed != NO) {
+        g_pointer_down.store(true);
+        g_pointer_hold.store(kPointerHoldFrames);
+    } else {
+        // The hold, not this flag, keeps the press alive for the frames it needs.
+        g_pointer_down.store(false);
+    }
+}
+
+void AZCorePointerStats(unsigned long long *polls, unsigned long long *pressedFrames) {
+    if (polls != nullptr) {
+        *polls = g_pointer_polls.load();
+    }
+    if (pressedFrames != nullptr) {
+        *pressedFrames = g_pointer_pressed_frames.load();
+    }
 }
 
 void AZCoreSetAudioCallback(AZCoreAudioCallback callback, void *context) {
