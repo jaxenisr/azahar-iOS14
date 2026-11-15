@@ -2,24 +2,87 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+/// What the library is showing. One system, so the switch has two sides rather
+/// than a picker: titles, or the system files the core reads.
+enum LibraryMode: String, CaseIterable, Identifiable {
+    case games
+    case systemFiles
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .games: return "Game"
+        case .systemFiles: return "System File"
+        }
+    }
+}
+
+/// One letter of the library, so `ForEach` has something to identify.
+private struct LibrarySection: Identifiable {
+    let letter: String
+    let games: [GameEntry]
+
+    var id: String { letter }
+}
+
 struct LibraryView: View {
     @EnvironmentObject private var library: GameLibrary
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var isImporting = false
     @State private var selected: GameEntry?
+    @State private var menuGame: GameEntry?
+    @State private var mode: LibraryMode = .games
+
+    private var isCompact: Bool { sizeClass == .compact }
 
     /// Three across in regular width, two in a narrow split. The cell is the same
     /// object in both; only how many fit changes.
     private var columns: [GridItem] {
-        let count = sizeClass == .compact ? 2 : 3
+        let count = isCompact ? 2 : 3
         return Array(repeating: GridItem(.flexible(), spacing: Design.Space.l, alignment: .top),
                      count: count)
     }
 
+    /// Titles bucketed by their first letter, in alphabetical order, with anything
+    /// that does not start with a letter under `#`. This is what makes a large
+    /// library scannable.
+    private var sections: [LibrarySection] {
+        var buckets: [String: [GameEntry]] = [:]
+        for game in library.games {
+            let first = game.title.first.map { String($0).uppercased() } ?? "#"
+            let key = first.rangeOfCharacter(from: .letters) == nil ? "#" : first
+            buckets[key, default: []].append(game)
+        }
+        return buckets.keys.sorted().map { key in
+            LibrarySection(letter: key,
+                           games: (buckets[key] ?? []).sorted {
+                               $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                           })
+        }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            content
+        GeometryReader { geometry in
+            ZStack(alignment: .trailing) {
+                VStack(spacing: 0) {
+                    header
+                    page
+                }
+
+                if let game = selected {
+                    Color.black.opacity(0.22)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { closeDetail() }
+                        .transition(.opacity)
+                        .animation(Design.Motion.backdrop)
+
+                    detailPane(for: game, available: geometry.size.width)
+                        .transition(.move(edge: .trailing))
+                        .animation(Design.Motion.panel)
+                }
+            }
         }
         .background(Design.Palette.background.ignoresSafeArea())
         .sheet(isPresented: $isImporting) {
@@ -27,9 +90,9 @@ struct LibraryView: View {
                 library.importFiles(urls)
             }
         }
-        .sheet(item: $selected) { game in
-            GameDetailView(game: game)
-                .environmentObject(library)
+        .actionSheet(isPresented: Binding(get: { menuGame != nil },
+                                          set: { if !$0 { menuGame = nil } })) {
+            actionSheet
         }
         .alert(isPresented: Binding(get: { library.message != nil },
                                     set: { if !$0 { library.message = nil } })) {
@@ -39,37 +102,165 @@ struct LibraryView: View {
         }
     }
 
+    // MARK: - Header
+
     private var header: some View {
-        ScreenHeader(title: "Games",
-                     subtitle: library.games.isEmpty
-                        ? "No titles yet"
-                        : "\(library.games.count) title\(library.games.count == 1 ? "" : "s")") {
-            CircleButton(symbol: "plus", label: "Import a game") {
-                isImporting = true
+        VStack(alignment: .leading, spacing: Design.Space.s) {
+            HStack(alignment: .top, spacing: Design.Space.m) {
+                VStack(alignment: .leading, spacing: Design.Space.xxs) {
+                    Text(mode == .games ? "Games" : "System Files")
+                        .font(Design.Fonts.title)
+                        .foregroundColor(Design.Palette.ink)
+                    Text(mode == .games ? "Nintendo 3DS" : "Documents/Azahar")
+                        .font(Design.Fonts.rowSubtitle)
+                        .foregroundColor(Design.Palette.secondaryInk)
+                    Text(countLine)
+                        .font(Design.Fonts.caption)
+                        .foregroundColor(Design.Palette.secondaryInk)
+                }
+                Spacer(minLength: Design.Space.xs)
+                HStack(spacing: Design.Space.xs) {
+                    CircleButton(symbol: "plus", label: "Import a game") {
+                        isImporting = true
+                    }
+                    moreButton
+                    systemsButton
+                }
             }
+
+            ChipRow(options: LibraryMode.allCases.map { $0.title },
+                    selection: LibraryMode.allCases.firstIndex(of: mode) ?? 0) { index in
+                mode = LibraryMode.allCases[index]
+            }
+        }
+        .padding(.horizontal, Design.Space.sideMargin)
+        .padding(.top, Design.Space.l)
+        .padding(.bottom, Design.Space.s)
+    }
+
+    private var countLine: String {
+        switch mode {
+        case .games:
+            let count = library.games.count
+            return count == 0 ? "No titles yet" : "\(count) title\(count == 1 ? "" : "s")"
+        case .systemFiles:
+            return "Read by the core at boot"
         }
     }
 
+    /// Two real actions and no invented ones: rescanning the folder matters when a
+    /// file was added over Files.app while the app was open.
+    private var moreButton: some View {
+        Menu {
+            Button(action: { library.reload() }) {
+                Label("Rescan library", systemImage: "arrow.clockwise")
+            }
+            Button(action: { isImporting = true }) {
+                Label("Import a game", systemImage: "plus")
+            }
+        } label: {
+            circleLabel("ellipsis")
+        }
+    }
+
+    /// The systems list. This app has exactly one system, and the menu says so
+    /// rather than pretending there is a picker.
+    private var systemsButton: some View {
+        Menu {
+            Text("Nintendo 3DS — the only system this app runs")
+        } label: {
+            circleLabel("globe")
+        }
+    }
+
+    private func circleLabel(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundColor(Design.Palette.ink)
+            .frame(width: 44, height: 44)
+            .background(Circle().fill(Design.Palette.card))
+            .overlay(Circle().stroke(Design.Palette.hairline, lineWidth: 1))
+            .designShadow(Design.Elevation.cover)
+            .contentShape(Circle())
+    }
+
+    // MARK: - Pages
+
     @ViewBuilder
-    private var content: some View {
-        if library.games.isEmpty {
-            emptyState
-        } else {
-            ScrollView {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: Design.Space.xl) {
-                    ForEach(library.games) { game in
-                        CoverCell(artwork: game.icon,
-                                  name: game.title,
-                                  meta: game.subtitle,
-                                  aspect: 1,
-                                  onOpen: { selected = game },
-                                  onMenu: nil)
+    private var page: some View {
+        switch mode {
+        case .games:
+            if library.games.isEmpty {
+                emptyState
+            } else {
+                gameGrid
+            }
+        case .systemFiles:
+            systemFileList
+        }
+    }
+
+    private var gameGrid: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Design.Space.xl) {
+                ForEach(sections) { section in
+                    VStack(alignment: .leading, spacing: Design.Space.s) {
+                        Text(section.letter)
+                            .font(Design.Fonts.section)
+                            .foregroundColor(Design.Palette.ink)
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: Design.Space.l) {
+                            ForEach(section.games) { game in
+                                CoverCell(artwork: game.icon,
+                                          name: game.title,
+                                          meta: game.subtitle,
+                                          aspect: 1,
+                                          onOpen: { openDetail(game) },
+                                          onMenu: { menuGame = game })
+                            }
+                        }
                     }
                 }
-                .padding(.horizontal, Design.Space.sideMargin)
-                .padding(.top, Design.Space.s)
-                .padding(.bottom, Design.Space.xxl * 3)
             }
+            .padding(.horizontal, Design.Space.sideMargin)
+            .padding(.top, Design.Space.s)
+            .padding(.bottom, Design.Space.xxl * 3)
+        }
+    }
+
+    private var systemFileList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Design.Space.l) {
+                DesignCard("In Documents/Azahar") {
+                    ForEach(library.coreFileStatus()) { status in
+                        HStack(alignment: .top, spacing: Design.Space.s) {
+                            Image(systemName: status.present ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundColor(status.present ? Design.Palette.positive : Color.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(status.id)
+                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .foregroundColor(Design.Palette.ink)
+                                Text(status.present ? status.note : "missing · \(status.note)")
+                                    .font(Design.Fonts.caption)
+                                    .foregroundColor(status.present ? Design.Palette.secondaryInk : Color.orange)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
+                Text("A decrypted dump boots with nothing else. Encrypted content needs sysdata/aes_keys.txt, and seeded titles need sysdata/seeddb.bin. Mii data and system saves live under nand/, which the core creates itself.")
+                    .font(Design.Fonts.caption)
+                    .foregroundColor(Design.Palette.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, Design.Space.sideMargin)
+            }
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, Design.Space.sideMargin)
+            .padding(.top, Design.Space.s)
+            .padding(.bottom, Design.Space.xxl * 3)
         }
     }
 
@@ -91,10 +282,70 @@ struct LibraryView: View {
             Spacer()
         }
     }
+
+    // MARK: - Detail
+
+    /// Regular width: a pane over the right half, with the grid still visible. A
+    /// narrow split has no room for that, so the pane is the whole width.
+    private func detailPane(for game: GameEntry, available: CGFloat) -> some View {
+        let width = isCompact ? available : min(max(available * 0.55, 420), 620)
+        return GameDetailView(game: game, onClose: { closeDetail() })
+            .frame(width: width)
+            .background(Design.Palette.background)
+            .clipShape(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous)
+                    .stroke(Design.Palette.hairline, lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .designShadow(Design.Elevation.card)
+            .padding(.trailing, isCompact ? 0 : Design.Space.xs)
+            .padding(.vertical, isCompact ? 0 : Design.Space.xs)
+            // Pulling the pane down closes it, the way a sheet does.
+            .gesture(
+                DragGesture(minimumDistance: 24)
+                    .onEnded { value in
+                        if value.translation.height > 120 { closeDetail() }
+                    }
+            )
+    }
+
+    private func openDetail(_ game: GameEntry) {
+        withAnimation(Design.Motion.panel) {
+            selected = game
+        }
+    }
+
+    private func closeDetail() {
+        withAnimation(Design.Motion.panel) {
+            selected = nil
+        }
+    }
+
+    // MARK: - Per-title menu
+
+    private var actionSheet: ActionSheet {
+        let game = menuGame
+        return ActionSheet(title: Text(game?.title ?? ""),
+                           buttons: [
+                            .default(Text("Open")) {
+                                if let game = game { openDetail(game) }
+                            },
+                            .destructive(Text("Remove from library")) {
+                                if let game = game { library.remove(game) }
+                            },
+                            .cancel()
+                           ])
+    }
 }
 
+/// The title page: art, name, size, one Play button, and the settings this title
+/// can override. Presented as a pane by the library, so its closing is the
+/// caller's business rather than a modal presentation.
 struct GameDetailView: View {
     let game: GameEntry
+    var onClose: (() -> Void)? = nil
+
     @EnvironmentObject private var library: GameLibrary
     @ObservedObject private var store = SettingsStore.shared
     @Environment(\.presentationMode) private var presentationMode
@@ -104,7 +355,7 @@ struct GameDetailView: View {
     private var effective: EmulationSettings { store.settings(for: game.id) }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             Design.Palette.background.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: Design.Space.l) {
@@ -113,7 +364,7 @@ struct GameDetailView: View {
 
                     column {
                         SettingsCard("This title") {
-                            SettingRow("Resolution scale", subtitle: gameOverride.resolutionScale == nil ? "Following the global value" : "Overridden for this title") {
+                            SettingRow("Resolution scale", subtitle: overrideNote(gameOverride.resolutionScale == nil)) {
                                 MenuChip(title: gameOverride.resolutionScale.map { "\($0)x" } ?? "Global") {
                                     Button("Use global") { update { $0.resolutionScale = nil } }
                                     ForEach(1...4, id: \.self) { scale in
@@ -122,7 +373,7 @@ struct GameDetailView: View {
                                 }
                             }
                             RowDivider()
-                            SettingRow("Screen layout", subtitle: gameOverride.layout == nil ? "Following the global value" : "Overridden for this title") {
+                            SettingRow("Screen layout", subtitle: overrideNote(gameOverride.layout == nil)) {
                                 MenuChip(title: gameOverride.layout?.title ?? "Global") {
                                     Button("Use global") { update { $0.layout = nil } }
                                     ForEach(PlaybackLayout.allCases) { layout in
@@ -131,7 +382,7 @@ struct GameDetailView: View {
                                 }
                             }
                             RowDivider()
-                            SettingRow("Emulation speed", subtitle: gameOverride.speed == nil ? "Following the global value" : "Overridden for this title") {
+                            SettingRow("Emulation speed", subtitle: overrideNote(gameOverride.speed == nil)) {
                                 MenuChip(title: gameOverride.speed?.title ?? "Global") {
                                     Button("Use global") { update { $0.speed = nil } }
                                     ForEach(PlaybackSpeed.allCases) { speed in
@@ -140,7 +391,7 @@ struct GameDetailView: View {
                                 }
                             }
                             RowDivider()
-                            SettingRow("3DS CPU clock", subtitle: gameOverride.cpuClockPercent == nil ? "Following the global value" : "Overridden for this title") {
+                            SettingRow("3DS CPU clock", subtitle: overrideNote(gameOverride.cpuClockPercent == nil)) {
                                 MenuChip(title: gameOverride.cpuClockPercent.map { "\($0)%" } ?? "Global") {
                                     Button("Use global") { update { $0.cpuClockPercent = nil } }
                                     ForEach(EmulationSettings.cpuClockChoices, id: \.self) { percent in
@@ -177,39 +428,13 @@ struct GameDetailView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
 
-                        SettingsCard("System files") {
-                            ForEach(library.coreFileStatus()) { status in
-                                HStack(alignment: .top, spacing: Design.Space.s) {
-                                    Image(systemName: status.present ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                        .font(.system(size: 13))
-                                        .foregroundColor(status.present ? Design.Palette.positive : Color.orange)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(status.id)
-                                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                            .foregroundColor(Design.Palette.ink)
-                                        Text(status.present ? status.note : "missing · \(status.note)")
-                                            .font(Design.Fonts.caption)
-                                            .foregroundColor(status.present ? Design.Palette.secondaryInk : Color.orange)
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                            }
-                            Text("A decrypted dump boots with nothing else. Encrypted content needs sysdata/aes_keys.txt, and seeded titles need sysdata/seeddb.bin. Mii data and system saves live under nand/, which the core creates itself.")
-                                .font(Design.Fonts.caption)
-                                .foregroundColor(Design.Palette.secondaryInk)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
                         SettingsCard("File") {
                             infoRow("Name", game.url.lastPathComponent)
+                            infoRow("Size", game.subtitle)
                             infoRow("Core", library.coreDescription)
-                            infoRow("Core check", library.coreStatus)
                         }
 
-                        Button(action: {
-                            library.remove(game)
-                            presentationMode.wrappedValue.dismiss()
-                        }) {
+                        Button(action: remove) {
                             Text("Remove from library")
                                 .font(Design.Fonts.rowTitle)
                                 .foregroundColor(Color.red.opacity(0.9))
@@ -219,13 +444,22 @@ struct GameDetailView: View {
                         .buttonStyle(PressableStyle(scale: 0.98))
                     }
                 }
-                .padding(.top, Design.Space.l)
+                .padding(.top, Design.Space.xxl)
                 .padding(.bottom, Design.Space.xxl * 2)
             }
+
+            closeButton
         }
         .fullScreenCover(item: $session) { session in
             PlaybackScreen(session: session)
         }
+    }
+
+    private var closeButton: some View {
+        CircleButton(symbol: "xmark", label: "Close") {
+            close()
+        }
+        .padding(Design.Space.m)
     }
 
     private var hero: some View {
@@ -234,7 +468,7 @@ struct GameDetailView: View {
                 Image(uiImage: icon)
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: 116, height: 116)
+                    .frame(width: 132, height: 132)
                     .clipShape(RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous))
                     .designShadow(Design.Elevation.card)
             }
@@ -271,6 +505,10 @@ struct GameDetailView: View {
         .padding(.horizontal, Design.Space.sideMargin)
     }
 
+    private func overrideNote(_ isGlobal: Bool) -> String {
+        isGlobal ? "Following the global value" : "Overridden for this title"
+    }
+
     /// The same column the settings screens use: 720 pt cap, 20 pt margins.
     private func column<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
@@ -296,6 +534,19 @@ struct GameDetailView: View {
                 .foregroundColor(Design.Palette.ink)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
+        }
+    }
+
+    private func remove() {
+        library.remove(game)
+        close()
+    }
+
+    private func close() {
+        if let onClose = onClose {
+            onClose()
+        } else {
+            presentationMode.wrappedValue.dismiss()
         }
     }
 }
