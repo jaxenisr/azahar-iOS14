@@ -16,6 +16,10 @@ struct PlaybackScreen: View {
     @Environment(\.presentationMode) private var presentationMode
     @State private var showsOverlay = true
     @State private var showsDiagnostics = false
+    /// The experimental layout's editing mode: while it is on, dragging a handle
+    /// changes a draft, and only Done writes it to the title's override.
+    @State private var editingControls = false
+    @State private var draftOffsets: [String: ControlOffset] = [:]
 
     private var settings: EmulationSettings { store.global.emulation }
 
@@ -71,6 +75,10 @@ struct PlaybackScreen: View {
                               })
                     .frame(width: geometry.size.width, height: geometry.size.height)
 
+                if settings.customControlsEnabled {
+                    controlEditor(metrics: metrics, size: geometry.size)
+                }
+
                 if case .failed(let reason) = session.phase {
                     failure(reason)
                         .frame(width: geometry.size.width, height: geometry.size.height)
@@ -116,14 +124,13 @@ struct PlaybackScreen: View {
         }
     }
 
-    /// Set when the audio graph refused to build. A silent game that says why is
-    /// better than a silent game that looks broken.
-    private var audioFailure: String? {
-        let counters = AudioOutput.shared.snapshot()
-        guard !counters.available else { return nil }
-        let name = counters.failureName ?? "audio unavailable"
-        let reason = counters.failureReason ?? ""
-        return "audio off · \(name): \(reason)"
+    /// The title's own nudges, or the draft while the editor is open.
+    private var controlOffsets: [String: ControlOffset] {
+        editingControls ? draftOffsets : store.controlOffsets(for: session.game.id)
+    }
+
+    private var controlPreset: ControlPreset {
+        store.settings(for: session.game.id).controlPreset
     }
 
     private func inputSetup(_ metrics: PlaybackGeometry) -> PlaybackInputView.Setup {
@@ -143,7 +150,131 @@ struct PlaybackScreen: View {
         setup.shoulderR = metrics.shoulderR
         setup.start = metrics.start
         setup.select = metrics.select
+
+        // The experimental layout goes last and only moves what is above: the
+        // standard path is the one every install uses, and it is unchanged.
+        if settings.customControlsEnabled {
+            ControlLayoutEngine.apply(preset: controlPreset, offsets: controlOffsets, to: &setup)
+        }
         return setup
+    }
+
+    // MARK: - Experimental layout editor
+
+    @ViewBuilder
+    private func controlEditor(metrics: PlaybackGeometry, size: CGSize) -> some View {
+        let setup = inputSetup(metrics)
+        if editingControls {
+            ZStack(alignment: .topLeading) {
+                ForEach(ControlSlot.allCases) { slot in
+                    let rect = frame(for: slot, in: setup)
+                    if rect.width > 1, rect.height > 1 {
+                        layoutHandle(slot, rect: rect)
+                    }
+                }
+
+                HStack(spacing: Design.Space.xs) {
+                    editorButton("Done") {
+                        saveOffsets()
+                        editingControls = false
+                    }
+                    editorButton("Reset") {
+                        draftOffsets = [:]
+                    }
+                    Text("Drag a control. It stays off the picture.")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.75))
+                        .padding(.trailing, Design.Space.xs)
+                }
+                .padding(.leading, Design.Space.xs)
+                .frame(height: 40)
+                .background(Capsule().fill(Color.black.opacity(0.72)))
+                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+                .padding(.leading, 20)
+                .padding(.top, safeInsets.top + 12)
+            }
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+        } else {
+            Button(action: {
+                draftOffsets = store.controlOffsets(for: session.game.id)
+                editingControls = true
+            }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "hand.draw")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Layout")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundColor(.white.opacity(0.85))
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Capsule().fill(Color.black.opacity(0.55)))
+                .overlay(Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.trailing, 16)
+            .padding(.top, safeInsets.top + 10)
+            .frame(width: size.width, height: size.height, alignment: .topTrailing)
+            .accessibilityLabel("Edit control layout")
+        }
+    }
+
+    private func frame(for slot: ControlSlot, in setup: PlaybackInputView.Setup) -> CGRect {
+        switch slot {
+        case .stick: return setup.stick
+        case .dpad: return setup.dpad
+        case .face: return setup.diamond
+        case .shoulderL: return setup.shoulderL
+        case .shoulderR: return setup.shoulderR
+        case .start: return setup.start
+        case .select: return setup.select
+        }
+    }
+
+    /// A dashed box over the control, dragged to nudge it. The other three
+    /// controls' handles are small labels so the boxes do not hide each other.
+    private func layoutHandle(_ slot: ControlSlot, rect: CGRect) -> some View {
+        let start = draftOffsets[slot.rawValue] ?? .zero
+        return ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Design.Palette.accent, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+            Text(slot.title)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 5)
+                .frame(height: 16)
+                .background(Capsule().fill(Design.Palette.accent.opacity(0.85)))
+        }
+        .frame(width: max(rect.width, 44), height: max(rect.height, 44))
+        .position(x: rect.midX, y: rect.midY)
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    draftOffsets[slot.rawValue] = ControlOffset(x: start.x + Double(value.translation.width),
+                                                               y: start.y + Double(value.translation.height))
+                }
+        )
+    }
+
+    private func editorButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(Capsule().fill(Design.Palette.accent))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func saveOffsets() {
+        var override = store.override(for: session.game.id)
+        let moved = draftOffsets.filter { !$0.value.isZero }
+        override.controlOffsets = moved.isEmpty ? nil : moved
+        store.setOverride(override, for: session.game.id)
     }
 
     private var surface: some View {
@@ -159,6 +290,7 @@ struct PlaybackScreen: View {
         }
         .clipped()
     }
+
 
     private func failure(_ reason: String) -> some View {
         VStack(spacing: 14) {
@@ -297,6 +429,16 @@ struct PlaybackScreen: View {
     private var audioToken: String {
         session.audio.state.split(separator: "·").first
             .map { $0.trimmingCharacters(in: .whitespaces) } ?? session.audio.state
+    }
+
+    /// Set when the audio graph refused to build. A silent game that says why is
+    /// better than a silent game that looks broken.
+    private var audioFailure: String? {
+        let counters = AudioOutput.shared.snapshot()
+        guard !counters.available else { return nil }
+        let name = counters.failureName ?? "audio unavailable"
+        let reason = counters.failureReason ?? ""
+        return "audio off · \(name): \(reason)"
     }
 
     private func statistic(_ label: String, _ value: String, metrics: HUDMetrics) -> some View {
@@ -483,8 +625,8 @@ final class TouchSurfaceView: UIView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = activeTouch, touches.contains(touch) else { return }
-        report(touch, pressed: true)
+        guard let activeTouch = activeTouch, touches.contains(activeTouch) else { return }
+        report(activeTouch, pressed: true)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
