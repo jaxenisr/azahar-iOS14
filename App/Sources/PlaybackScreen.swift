@@ -17,10 +17,17 @@ struct PlaybackScreen: View {
 
     private var settings: EmulationSettings { store.global.emulation }
 
+    /// The screen ignores the safe area, so the geometry reader reports none. The
+    /// window still knows where the home indicator and the rounded corners are.
+    private var safeInsets: UIEdgeInsets {
+        let window = UIApplication.shared.windows.first { $0.isKeyWindow }
+        return window?.safeAreaInsets ?? .zero
+    }
+
     var body: some View {
         GeometryReader { geometry in
             let metrics = ControlMetrics.make(in: geometry.size,
-                                              safeArea: geometry.safeAreaInsets,
+                                              safeArea: safeInsets,
                                               scale: CGFloat(settings.clampedScale))
             ZStack {
                 Color.black
@@ -36,7 +43,7 @@ struct PlaybackScreen: View {
                 .position(x: metrics.game.midX, y: metrics.game.midY)
 
                 if !controllers.isConnected {
-                    ControlsOverlay(setup: controlSetup(metrics: metrics, safe: geometry.safeAreaInsets),
+                    ControlsOverlay(setup: controlSetup(metrics: metrics, safe: safeInsets),
                                     onButton: { mask, pressed in
                                         session.setButton(mask, pressed: pressed)
                                     },
