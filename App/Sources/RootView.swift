@@ -43,6 +43,9 @@ struct RootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             TabBar(selection: $tab)
+                // Whatever the screen underneath does with a touch at the bottom,
+                // the bar is the view that has to get it.
+                .zIndex(1)
         }
         .background(Color(red: 0.04, green: 0.05, blue: 0.07).ignoresSafeArea())
     }
@@ -52,30 +55,59 @@ struct TabBar: View {
     @Binding var selection: RootTab
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             ForEach(RootTab.allCases) { item in
                 Button(action: { selection = item }) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 7) {
                         Image(systemName: item.symbol)
                             .font(.system(size: 15, weight: .semibold))
                         if selection == item {
                             Text(item.title)
                                 .font(.system(size: 12, weight: .semibold))
+                                .fixedSize()
                         }
                     }
-                    .foregroundColor(selection == item ? .white : .white.opacity(0.45))
-                    .padding(.horizontal, 18)
+                    .foregroundColor(selection == item ? .white : .white.opacity(0.5))
+                    .padding(.horizontal, 16)
                     .frame(height: 44)
-                    .background(Capsule().fill(selection == item ? Color.white.opacity(0.14) : Color.clear))
+                    .frame(minWidth: 62)
+                    .background(Capsule().fill(selection == item
+                                               ? Color.white.opacity(0.14)
+                                               : Color.white.opacity(0.0001)))
+                    // A button takes touches in its content, not in its padding,
+                    // and a clear fill is not content. Without this the padded
+                    // frame was decoration and only the 15 pt glyph responded:
+                    // an unselected tab looked dead. The whole slice is the target.
+                    .contentShape(Capsule())
                 }
-                .buttonStyle(PlainButtonStyle())
+                .buttonStyle(TabButtonStyle())
                 .accessibilityLabel(item.title)
+                .accessibilityAddTraits(selection == item ? [.isSelected] : [])
             }
         }
         .padding(6)
-        .background(BlurBackdrop(style: .systemThinMaterialDark).clipShape(Capsule()))
-        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .background(
+            BlurBackdrop(style: .systemThinMaterialDark)
+                .clipShape(Capsule())
+                .allowsHitTesting(false)
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .allowsHitTesting(false)
+        )
         .padding(.bottom, 10)
+    }
+}
+
+/// Press feedback of its own, so a tab that receives a touch always shows it,
+/// whether or not its label happens to have a fill behind it.
+struct TabButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.55 : 1)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.12))
     }
 }
 
