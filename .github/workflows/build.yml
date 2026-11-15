@@ -1,0 +1,184 @@
+name: build-ipa
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Only what is needed to read the code and (optionally) attach a release.
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Section 7 build contract. These must not drift.
+  IPHONEOS_DEPLOYMENT_TARGET: "14.0"
+  SCHEME: AzaharIPad
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Two toolchains, deliberately:
+      #  - the core needs Xcode 26's libc++ (its std::format float path is
+      #    unavailable below iOS 16.3 in the iOS 18 SDK), which is exactly how
+      #    Azahar's own iOS job builds it at deployment target 14.0;
+      #  - the app (Swift) is built and linked with Xcode 16, the toolchain whose
+      #    published deployment-target range covers iOS 14.
+      - name: Locate Xcode 16.x for the app
+        run: |
+          set -euo pipefail
+          candidates="$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V || true)"
+          if [ -z "$candidates" ]; then
+            echo "::error::No Xcode 16.x on this runner. Installed:"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          pick="$(echo "$candidates" | tail -1)"
+          echo "APP_XCODE=$pick" >> "$GITHUB_ENV"
+          echo "App toolchain: $pick"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Fetch pinned Azahar
+        run: bash scripts/fetch-azahar.sh
+
+      - name: Select Xcode 26.x for the core
+        run: |
+          set -euo pipefail
+          candidates="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V || true)"
+          if [ -z "$candidates" ]; then
+            echo "::error::No Xcode 26.x on this runner (required to compile Azahar's C++20 sources at deployment target 14.0)."
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          pick="$(echo "$candidates" | tail -1)"
+          sudo xcode-select -s "$pick"
+          xcodebuild -version
+
+      - name: Build core for iOS 14 arm64
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/build-core.sh 2>&1 | tee build/core-build.log
+
+      - name: Select Xcode 16.x for the app
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s "$APP_XCODE"
+          xcodebuild -version
+
+      # The icon is drawn, not stored, so it has to exist before the catalog is read.
+      - name: Draw app icon
+        run: python3 scripts/make-icon.py App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build app
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild \
+            -project AzaharIPad.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build/xcodebuild.log
+
+      - name: Package and ad-hoc sign IPA
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/package-ipa.sh 2>&1 | tee build/package.log
+
+      # The log travels with the IPA so every build carries its own verification.
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Azahar-ipa
+          path: |
+            Azahar.ipa
+            build/package.log
+          if-no-files-found: error
+
+      # Release publishing is gated on a token that belongs to the repository
+      # owner. Without it nothing is published, so no bot account ever appears as
+      # the release author.
+      - name: Publish release as Jaxenisr
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_PAT:-}" ]; then
+            echo "RELEASE_PAT is not set: skipping release. Download the Azahar-ipa artifact instead."
+            exit 0
+          fi
+          git config user.name "Jaxenisr"
+          git config user.email "Jaxenisr@users.noreply.github.com"
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' App/Info.plist)"
+          TAG="v${VERSION}"
+          echo "Tagging $TAG as Jaxenisr"
+          git tag -f -a "$TAG" -m "Azahar for iPadOS 14 $TAG"
+          git push "https://x-access-token:${RELEASE_PAT}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${TAG}" --force
+          echo "Attaching IPA to $TAG"
+          GH_TOKEN="$RELEASE_PAT" gh release create "$TAG" Azahar.ipa \
+            --title "Azahar for iPadOS 14 $TAG" \
+            --notes "Ad-hoc signed IPA for TrollStore, built from $(git rev-parse --short HEAD) against Azahar $(cat vendor/azahar/COMMIT 2>/dev/null || echo 'pinned tag')." \
+            --repo "$GITHUB_REPOSITORY" || \
+          GH_TOKEN="$RELEASE_PAT" gh release upload "$TAG" Azahar.ipa --clobber --repo "$GITHUB_REPOSITORY"
+
+      # Build logs are not readable without a signed-in GitHub session, so the
+      # tail of whatever failed is recorded on a separate branch instead. This
+      # never touches main and nothing is published from it.
+      - name: Record failure output
+        if: failure()
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p ci
+          {
+            echo "# Failure output for ${GITHUB_SHA}"
+            echo
+            echo '```'
+            if [ -f build/core-build.log ]; then
+              echo "--- core build (last 120 lines) ---"
+              tail -n 120 build/core-build.log
+            fi
+            if [ -f build/libtool.log ]; then
+              echo "--- archive merge (last 40 lines) ---"
+              tail -n 40 build/libtool.log
+            fi
+            if [ -f build/xcodebuild.log ]; then
+              echo "--- xcodebuild (last 120 lines) ---"
+              tail -n 120 build/xcodebuild.log
+            fi
+            if [ -f build/package.log ]; then
+              echo "--- packaging (last 80 lines) ---"
+              tail -n 80 build/package.log
+            fi
+            if [ ! -f build/core-build.log ] && [ ! -f build/xcodebuild.log ] && [ ! -f build/package.log ]; then
+              echo "--- no build log was produced ---"
+              ls -la build 2>/dev/null || echo "(no build directory)"
+            fi
+            echo '```'
+          } > ci/failure.txt
+          git config user.name "Jaxenisr"
+          git config user.email "Jaxenisr@users.noreply.github.com"
+          git checkout --orphan ci-diagnostics
+          git add -f ci/failure.txt
+          git commit -m "Record failure output for ${GITHUB_SHA}"
+          git push --force origin ci-diagnostics
