@@ -6,12 +6,13 @@ struct AzaharApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LibraryView()
+            RootView()
                 .environmentObject(library)
                 .preferredColorScheme(.dark)
                 .onAppear {
                     library.reload()
                     library.runCoreCheck()
+                    AudioOutput.shared.prepare()
                 }
         }
     }
