@@ -65,7 +65,20 @@ FOUNDATION_EXPORT void AZCoreSetCirclePad(int x, int y);
 /// the right, y is -1 at the top and 1 at the bottom. The core maps that onto
 /// the bottom screen for whichever layout is active, so this frontend never has
 /// to know where the bottom screen sits.
+///
+/// A press is held for a few frames after `pressed` goes back to NO: the core
+/// samples input once per frame, and a tap that ends between two samples would
+/// otherwise be lost entirely.
 FOUNDATION_EXPORT void AZCoreSetPointer(float x, float y, BOOL pressed);
+
+/// Counters for the touch path, cumulative since the core started.
+///
+/// `polls` counts the times the core asked for a pointer — it asks up to four
+/// times a frame (pressed, count, x, y), so it climbs on its own while a game
+/// runs. `pressedFrames` counts the frames in which the core saw a press, which
+/// is the number that has to reach 2 for a tap to reach the game.
+FOUNDATION_EXPORT void AZCorePointerStats(unsigned long long *polls,
+                                          unsigned long long *pressedFrames);
 
 /// Audio the core produces, handed over as interleaved stereo int16 frames. The
 /// pointer is only valid for the duration of the call. Azahar drives this from
