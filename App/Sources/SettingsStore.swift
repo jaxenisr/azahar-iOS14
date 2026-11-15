@@ -47,6 +47,7 @@ final class SettingsStore: ObservableObject {
     private let defaults = UserDefaults.standard
     private let globalKey = "azahar.settings.global.v1"
     private let overridesKey = "azahar.settings.overrides.v1"
+    private let layoutMigrationKey = "azahar.settings.stackedDefault.v1"
 
     private init() {
         load()
@@ -154,6 +155,19 @@ final class SettingsStore: ObservableObject {
         if let data = defaults.data(forKey: overridesKey),
            let decoded = try? JSONDecoder().decode([String: GameOverride].self, from: data) {
             overrides = decoded
+        }
+
+        // Titles now start stacked, the way the console is held. A stored global
+        // that is still the previous default is moved over once, so an update
+        // does not need the setting to be found and changed by hand. A layout
+        // picked deliberately — anything other than the old default — is left
+        // alone, and per-title overrides are untouched.
+        if !defaults.bool(forKey: layoutMigrationKey) {
+            defaults.set(true, forKey: layoutMigrationKey)
+            if global.emulation.layout == .largeScreen {
+                global.emulation.layout = .stacked
+                save()
+            }
         }
     }
 
