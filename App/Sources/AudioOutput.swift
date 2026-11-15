@@ -116,7 +116,7 @@ final class AudioRingBuffer {
     }
 }
 
-/// Plays whatever the core produces.
+/// Plays whatever the core produces, and never takes the emulator down with it.
 ///
 /// One `AVAudioSourceNode` pulls from the ring buffer in the core's own sample
 /// rate and the engine's mixer converts to the hardware rate, so nothing here
@@ -124,6 +124,13 @@ final class AudioRingBuffer {
 /// right. The audio session is a `.playback` session, which is what makes an
 /// emulator audible with the ring/silent switch on, and it is reactivated after
 /// calls, Siri, route changes and a trip to the background.
+///
+/// AVFAudio reports a refused graph as an Objective-C exception, not an error,
+/// and an uncaught one aborts the process. Two things follow: the graph is built
+/// with the format AVAudioEngine actually supports (deinterleaved float), and
+/// every call into AVFoundation runs inside `AZTryCatch`. If one raises anyway,
+/// audio is switched off, the name and reason are kept and logged, and the
+/// emulator keeps running in silence.
 final class AudioOutput {
     struct Counters {
         var produced: UInt64 = 0
@@ -134,8 +141,11 @@ final class AudioOutput {
         var coreSampleRate: Double = 0
         var latencyMilliseconds: Double = 0
         var engineRunning = false
+        var available = true
         var state = "idle"
-        var lastError: String?
+        var failureName: String?
+        var failureReason: String?
+        var failureFrames: String?
     }
 
     static let shared = AudioOutput()
@@ -147,11 +157,15 @@ final class AudioOutput {
     private let scratch: UnsafeMutablePointer<Int16>
     private let lock = NSLock()
     private var running = false
+    private var unavailable = false
     private var desiredRate: Double = 32728
     private var volume: Float = 1
     private var muted = false
     private var state = "idle"
-    private var lastError: String?
+    private var failureName: String?
+    private var failureReason: String?
+    private var failureFrames: String?
+    private var startError: String?
     private var observers: [NSObjectProtocol] = []
 
     private init() {
@@ -162,16 +176,24 @@ final class AudioOutput {
 
     // MARK: - Lifecycle
 
-    /// Starts (or restarts) playback at the core's rate. Safe to call twice.
+    /// Starts (or restarts) playback at the core's rate. Safe to call twice, and
+    /// safe to call after a failure: a refused graph leaves audio off, not the
+    /// app down.
     func start(sampleRate: Double) {
         lock.lock()
-        let changedRate = abs(sampleRate - desiredRate) > 0.5
-        desiredRate = sampleRate > 1000 ? sampleRate : 32728
-        let alreadyRunning = running && engine.isRunning && !changedRate
+        let rate = sampleRate.isFinite && sampleRate > 1000 ? sampleRate : 32728
+        let changedRate = abs(rate - desiredRate) > 0.5
+        desiredRate = rate
+        let alreadyRunning = running && !unavailable && engine.isRunning && !changedRate
+        let off = unavailable
         lock.unlock()
 
+        guard !off else { return }
+
         activateSession()
+        if isUnavailable { return }
         if alreadyRunning { return }
+
         if changedRate || sourceNode == nil {
             buildEngine()
         } else {
@@ -186,17 +208,37 @@ final class AudioOutput {
     }
 
     func stop() {
+        _ = AZTryCatch { [self] in
+            engine.stop()
+            if let node = sourceNode {
+                engine.detach(node)
+            }
+            sourceNode = nil
+            engine = AVAudioEngine()
+        }
+
         lock.lock()
         running = false
+        unavailable = false
+        failureName = nil
+        failureReason = nil
+        failureFrames = nil
+        startError = nil
         state = "stopped"
         lock.unlock()
-        engine.stop()
-        if let node = sourceNode {
-            engine.detach(node)
-            sourceNode = nil
+
+        // Silent on purpose: a stopped engine should not leave the app holding
+        // the session, and a refusal here is not worth reporting.
+        _ = AZTryCatch {
+            try? AVAudioSession.sharedInstance().setActive(false,
+                                                          options: .notifyOthersOnDeactivation)
         }
-        try? AVAudioSession.sharedInstance().setActive(false,
-                                                      options: .notifyOthersOnDeactivation)
+    }
+
+    var isUnavailable: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return unavailable
     }
 
     func setVolume(_ value: Float) {
@@ -215,6 +257,7 @@ final class AudioOutput {
 
     /// Emulation thread. Called for every `audio_sample_batch`.
     func write(_ frames: UnsafePointer<Int16>, frameCount: Int) {
+        guard !isUnavailable else { return }
         ring.write(frames, frameCount: frameCount)
     }
 
@@ -224,7 +267,10 @@ final class AudioOutput {
         let rate = desiredRate
         let runningNow = running
         let note = state
-        let error = lastError
+        let off = unavailable
+        let name = failureName
+        let reason = failureReason
+        let frames = failureFrames
         let engineAlive = engine.isRunning
         lock.unlock()
 
@@ -237,11 +283,14 @@ final class AudioOutput {
         counters.coreSampleRate = rate
         counters.latencyMilliseconds = rate > 0 ? Double(ringState.buffered) / rate * 1000 : 0
         counters.engineRunning = engineAlive
+        counters.available = !off
         counters.state = note
-        counters.lastError = error
+        counters.failureName = name
+        counters.failureReason = reason
+        counters.failureFrames = frames
 
-        if runningNow && !engineAlive && error == nil {
-            counters.lastError = "engine stopped"
+        if runningNow && !engineAlive && !off {
+            counters.state = "engine stopped"
         }
         return counters
     }
@@ -253,31 +302,34 @@ final class AudioOutput {
         let rate = desiredRate
         lock.unlock()
 
-        engine.stop()
-        if let node = sourceNode {
-            engine.detach(node)
+        // Deinterleaved float is the format AVAudioEngine's graph is built for.
+        // An interleaved format raises "required condition is false" from inside
+        // AVFAudio as soon as the node is connected, which is what aborted the
+        // app at launch before this was spelled out.
+        let audioFormat = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)
+
+        let problem = AZTryCatch { [self] in
+            engine.stop()
+            if let node = sourceNode {
+                engine.detach(node)
+            }
             sourceNode = nil
+            engine = AVAudioEngine()
+
+            let node = AVAudioSourceNode(format: audioFormat) { [weak self] _, _, frameCount, bufferList -> OSStatus in
+                guard let self = self else { return noErr }
+                return self.render(frameCount: frameCount, into: bufferList)
+            }
+            engine.attach(node)
+            engine.connect(node, to: engine.mainMixerNode, format: audioFormat)
+            sourceNode = node
         }
-        engine = AVAudioEngine()
 
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                   sampleRate: rate,
-                                   channels: 2,
-                                   interleaved: true)
-            ?? AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)
-
-        guard let audioFormat = format else {
-            fail("the audio format \(Int(rate)) Hz stereo could not be created")
+        if let problem = problem {
+            disable(problem)
             return
         }
 
-        let node = AVAudioSourceNode(format: audioFormat) { [weak self] _, _, frameCount, bufferList -> OSStatus in
-            guard let self = self else { return noErr }
-            return self.render(frameCount: frameCount, into: bufferList)
-        }
-        engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: audioFormat)
-        sourceNode = node
         applyVolume()
         startEngine()
     }
@@ -287,54 +339,124 @@ final class AudioOutput {
             buildEngine()
             return
         }
-        do {
-            try engine.start()
-            lock.lock()
-            running = true
-            lastError = nil
-            state = describeSession(prefix: "playing")
-            lock.unlock()
-        } catch {
-            fail("engine start failed: \(error.localizedDescription)")
+
+        lock.lock()
+        startError = nil
+        lock.unlock()
+
+        let problem = AZTryCatch { [self] in
+            do {
+                try engine.start()
+            } catch {
+                lock.lock()
+                startError = error.localizedDescription
+                lock.unlock()
+            }
         }
+
+        if let problem = problem {
+            disable(problem)
+            return
+        }
+
+        lock.lock()
+        let thrown = startError
+        startError = nil
+        if let thrown = thrown {
+            running = false
+            state = "engine start failed · \(thrown)"
+            lock.unlock()
+            return
+        }
+        running = true
+        state = describeSession(prefix: "playing")
+        lock.unlock()
     }
 
-    private func fail(_ message: String) {
+    /// Switches audio off for the rest of this session and records why. Nothing
+    /// here can propagate: this is the last stop before the app would die.
+    private func disable(_ problem: [String: String]) {
+        let name = problem["name"] ?? "NSException"
+        let reason = problem["reason"] ?? "no reason given"
+        let frames = problem["callStack"] ?? ""
+
         lock.lock()
+        unavailable = true
         running = false
-        lastError = message
-        state = "error"
+        failureName = name
+        failureReason = reason
+        failureFrames = frames
+        state = "unavailable · \(name): \(reason)"
         lock.unlock()
+
+        let line = "audio unavailable · \(name): \(reason) · \(frames)"
+        NSLog("[Azahar] %@", line)
+        AZAppendAudioFailure(line)
+
+        _ = AZTryCatch { [self] in
+            engine.stop()
+            if let node = sourceNode {
+                engine.detach(node)
+            }
+            sourceNode = nil
+            engine = AVAudioEngine()
+        }
     }
 
     private func applyVolume() {
         lock.lock()
         let level = muted ? 0 : volume
+        let attached = sourceNode != nil
         lock.unlock()
-        guard sourceNode != nil else { return }
-        engine.mainMixerNode.outputVolume = level
+        guard attached else { return }
+
+        if let problem = AZTryCatch({ [self] in
+            engine.mainMixerNode.outputVolume = level
+        }) {
+            disable(problem)
+        }
     }
 
     private func render(frameCount: AVAudioFrameCount,
                         into bufferList: UnsafeMutablePointer<AudioBufferList>) -> OSStatus {
         let frames = Int(frameCount)
         let list = UnsafeMutableAudioBufferListPointer(bufferList)
-        guard let first = list.first, let raw = first.mData else { return noErr }
+        let wanted = min(frames, scratchFrames)
+        let read = ring.read(into: scratch, frameCount: wanted)
+        let available = max(0, min(read, wanted))
+        let scale: Float = 1.0 / 32768.0
 
-        let floats = raw.assumingMemoryBound(to: Float.self)
-        let wanted = frames * 2
-        let read = ring.read(into: scratch, frameCount: min(frames, scratchFrames))
-        let available = min(read, scratchFrames)
+        if list.count >= 2 {
+            // Deinterleaved: one buffer per channel, which is the format the
+            // source node is built with.
+            for channel in 0..<list.count {
+                guard let raw = list[channel].mData else { continue }
+                let out = raw.assumingMemoryBound(to: Float.self)
+                if channel < 2 {
+                    var index = 0
+                    while index < frames {
+                        out[index] = index < available
+                            ? Float(scratch[index * 2 + channel]) * scale
+                            : 0
+                        index += 1
+                    }
+                } else {
+                    memset(raw, 0, frames * MemoryLayout<Float>.size)
+                }
+            }
+        } else if let first = list.first, let raw = first.mData {
+            // Interleaved: one buffer holding both channels. Defensive only, but
+            // writing the wrong shape here is an EXC_BAD_ACCESS rather than an
+            // exception, so it is worth handling.
+            let out = raw.assumingMemoryBound(to: Float.self)
+            let needed = frames * 2
+            var index = 0
+            while index < needed {
+                out[index] = index < available * 2 ? Float(scratch[index]) * scale : 0
+                index += 1
+            }
+        }
 
-        var index = 0
-        while index < available * 2 {
-            floats[index] = Float(scratch[index]) * (1.0 / 32768.0)
-            index += 1
-        }
-        while index < wanted {
-            floats[index] = 0
-            index += 1
-        }
         return noErr
     }
 
@@ -342,16 +464,30 @@ final class AudioOutput {
 
     private func activateSession() {
         let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true)
-            lock.lock()
-            if lastError == nil || state == "idle" || state == "stopped" {
-                state = describeSession(prefix: "ready")
+        var thrown: String?
+
+        let problem = AZTryCatch {
+            do {
+                try session.setCategory(.playback, mode: .default, options: [])
+                try session.setActive(true)
+            } catch {
+                thrown = error.localizedDescription
             }
-            lock.unlock()
-        } catch {
-            fail("session failed: \(error.localizedDescription)")
+        }
+
+        if let problem = problem {
+            disable(problem)
+            return
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+        if let thrown = thrown {
+            // Not fatal: the graph may still run, and a call that is ending will
+            // be followed by a resume.
+            state = "session failed · \(thrown)"
+        } else if !unavailable {
+            state = describeSession(prefix: running ? "playing" : "ready")
         }
     }
 
@@ -423,7 +559,9 @@ final class AudioOutput {
 
         switch type {
         case .began:
-            engine.pause()
+            _ = AZTryCatch { [self] in
+                engine.pause()
+            }
             lock.lock()
             state = "interrupted"
             lock.unlock()
@@ -458,41 +596,69 @@ final class AudioOutput {
     }
 
     private func handleConfigurationChange() {
-        lock.lock()
-        let wanted = running
-        lock.unlock()
-        guard wanted else { return }
+        guard wantsEngine else { return }
         buildEngine()
     }
 
     private func handleMediaServicesReset() {
-        lock.lock()
-        let wanted = running
-        lock.unlock()
-        guard wanted else { return }
+        guard wantsEngine else { return }
         activateSession()
+        if isUnavailable { return }
         buildEngine()
     }
 
     private func resumeIfWanted(reason: String) {
-        lock.lock()
-        let wanted = running
-        lock.unlock()
-        guard wanted else { return }
+        guard wantsEngine else { return }
+        guard !isUnavailable else { return }
 
         activateSession()
+        if isUnavailable { return }
+
         if engine.isRunning { return }
         if sourceNode == nil {
             buildEngine()
         } else {
-            do {
+            let problem = AZTryCatch { [self] in
                 try engine.start()
-                lock.lock()
-                state = describeSession(prefix: reason)
-                lock.unlock()
-            } catch {
-                buildEngine()
             }
+            if let problem = problem {
+                disable(problem)
+                return
+            }
+            lock.lock()
+            running = true
+            state = describeSession(prefix: reason)
+            lock.unlock()
         }
+    }
+
+    private var wantsEngine: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return running
+    }
+}
+
+/// Writes the audio failure to the core's log directory, where the diagnostics
+/// screen points and where a bug report can find it later.
+private func AZAppendAudioFailure(_ line: String) {
+    guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+    let directory = documents.appendingPathComponent("Azahar/log", isDirectory: true)
+    do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("frontend-crash.log")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let text = "\(stamp) \(line)\n"
+        guard let data = text.data(using: .utf8) else { return }
+        if FileManager.default.fileExists(atPath: url.path) {
+            let handle = try FileHandle(forWritingTo: url)
+            handle.seekToEndOfFile()
+            handle.write(data)
+            handle.closeFile()
+        } else {
+            try data.write(to: url)
+        }
+    } catch {
+        NSLog("[Azahar] audio failure could not be logged: %@", error.localizedDescription)
     }
 }
