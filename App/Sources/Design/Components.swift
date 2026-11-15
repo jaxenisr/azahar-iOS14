@@ -196,6 +196,7 @@ struct ChipRow: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(PressableStyle())
+                .pressHaptic()
                 .accessibilityAddTraits(selection == index ? [.isSelected] : [])
             }
         }
@@ -229,6 +230,7 @@ struct CircleButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressableStyle())
+        .pressHaptic()
         .accessibilityLabel(label)
     }
 }
@@ -272,43 +274,66 @@ struct FloatingCapsuleBar<Content: View>: View {
 /// source may not be; the cell never assumes 1:1, it is told. When there is no
 /// artwork the placeholder is the same size, so a grid never reflows as icons
 /// decode.
+///
+/// `heroNamespace` is how the cell lends its artwork to a detail pane: both draw
+/// the same geometry id, so opening a title grows the cover into the hero rather
+/// than sliding a second copy of the picture in.
 struct CoverCell: View {
     let artwork: UIImage?
     let name: String
     let meta: String
     var aspect: CGFloat = 1
+    var heroNamespace: Namespace.ID? = nil
+    var heroID: String = "cover"
+    var heroSource: Bool = true
     var onOpen: () -> Void
     var onMenu: (() -> Void)?
+
+    private var artworkLayer: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous)
+                .fill(Design.Palette.hairline.opacity(0.5))
+            if let artwork = artwork {
+                Image(uiImage: artwork)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .padding(Design.Space.xs)
+            } else {
+                Text(String(name.prefix(1)).uppercased())
+                    .font(Design.Fonts.section)
+                    .foregroundColor(Design.Palette.secondaryInk)
+            }
+        }
+        .aspectRatio(aspect, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous)
+                .stroke(Design.Palette.hairline, lineWidth: 1)
+                .allowsHitTesting(false)
+        )
+        .designShadow(Design.Elevation.cover)
+        .contentShape(RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous))
+    }
+
+    private var heroedArtwork: some View {
+        Group {
+            if let namespace = heroNamespace {
+                artworkLayer
+                    .matchedGeometryEffect(id: heroID, in: namespace, isSource: heroSource)
+            } else {
+                artworkLayer
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Space.xs) {
             Button(action: onOpen) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous)
-                        .fill(Design.Palette.hairline.opacity(0.5))
-                    if let artwork = artwork {
-                        Image(uiImage: artwork)
-                            .resizable()
-                            .interpolation(.high)
-                            .aspectRatio(contentMode: .fit)
-                            .padding(Design.Space.xs)
-                    } else {
-                        Text(String(name.prefix(1)).uppercased())
-                            .font(Design.Fonts.section)
-                            .foregroundColor(Design.Palette.secondaryInk)
-                    }
-                }
-                .aspectRatio(aspect, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous)
-                        .stroke(Design.Palette.hairline, lineWidth: 1)
-                        .allowsHitTesting(false)
-                )
-                .designShadow(Design.Elevation.cover)
-                .contentShape(RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous))
+                heroedArtwork
             }
             .buttonStyle(PressableStyle())
+            .pressHaptic()
             .accessibilityLabel(name)
 
             HStack(alignment: .top, spacing: Design.Space.xs) {
@@ -334,6 +359,7 @@ struct CoverCell: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(PressableStyle())
+                    .pressHaptic()
                     .accessibilityLabel("More options for \(name)")
                 }
             }
