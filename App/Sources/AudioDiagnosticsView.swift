@@ -103,13 +103,7 @@ struct AudioDiagnosticsView: View {
                             tint: touch.polls > 0 ? Color.white.opacity(0.85) : .orange)
                         row("Pressed frames", "\(touch.pressedFrames)",
                             tint: touch.pressedFrames >= 2 ? Color.green.opacity(0.85) : .orange)
-                        row("Hit test", TouchAudit.lastHit,
-                            tint: TouchAudit.reachedSurface ? Color.green.opacity(0.85) : .orange)
-                        row("Hit tests", "\(TouchAudit.hitTests)",
-                            tint: TouchAudit.hitTests > 0 ? Color.white.opacity(0.85) : .orange)
-                        hint("Tap the lower screen once and read the deltas: Taps +1, Polls above zero, Pressed frames +2 or more. Taps staying put means the tap never reached the emulator's surface. Taps moving while Polls stays put means the core is not asking for a pointer at all. Pressed frames staying put while Polls climbs means the press is not being read as one.")
-                        hint("Polls climb on their own while a game runs — the core asks up to four times a frame — so it is the change after a tap that is worth reading, not the total.")
-                        hint("Hit test names the view UIKit gave the last touch to, most specific first, and Hit tests counts every touch on the window. When it does not start with TouchSurfaceView, the tap was taken by the layer named instead — that is the view to look at, not the coordinates.")
+                        hint("Tap the lower screen once and read the deltas: Taps +1, Polls above zero, Pressed frames +2 or more. Taps staying put means the tap never reached the emulator, and Pressed frames staying put while Polls climbs means the press is not being read as one.")
                     }
 
                     SettingsCard("How to read this") {
