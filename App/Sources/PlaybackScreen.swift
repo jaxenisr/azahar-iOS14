@@ -489,10 +489,11 @@ final class TouchSurfaceView: UIView {
     /// onto the core's frame; the core then maps it onto the bottom screen.
     ///
     /// In the stacked layout the picture is the pair plus the hinge, and only the
-    /// lower half is a touchscreen: a point there is normalised against that half,
-    /// which is exactly where the core's bottom-screen rect sits in its own frame.
-    /// The pixel under the finger is therefore the pixel the core gets, whatever
-    /// the scale. Points above the lower half map outside it and are ignored.
+    /// lower half holds the touchscreen. The core measures the pointer across its
+    /// whole frame, though, and drops a press that lands above the bottom screen,
+    /// so the point is turned into a fraction of that frame: the lower half starts
+    /// at the middle of it. The pixel under the finger is therefore the pixel the
+    /// core gets, at any scale.
     private func report(_ touch: UITouch, pressed: Bool) {
         let point = touch.location(in: self)
         let size = bounds.size
@@ -503,9 +504,17 @@ final class TouchSurfaceView: UIView {
             let unit = size.height * (1 - fraction) / 2
             guard unit > 1 else { return }
             let bottomTop = size.height - unit
-            let x = (point.x / size.width) * 2 - 1
-            let y = (point.y - bottomTop) / unit
-            onTouch?(min(max(x, -1.5), 1.5), min(max(y, -1.5), 1.5), pressed)
+            // The pointer the core reads is normalised over its whole frame -- top
+            // screen above, bottom screen below -- and a press that does not land
+            // inside the lower screen is dropped. So the point becomes a fraction
+            // of that frame: across the full width, and downwards from the middle
+            // for the lower half. Sending the lower half as -1...1 instead maps
+            // every tap into the top half, where the core ignores it.
+            let frameX = point.x / size.width
+            let frameY = 0.5 + 0.5 * ((point.y - bottomTop) / unit)
+            let x = frameX * 2 - 1
+            let y = frameY * 2 - 1
+            onTouch?(min(max(x, -1.5), 1.5), min(max(y, -0.25), 1.25), pressed)
             return
         }
 
