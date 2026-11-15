@@ -5,39 +5,127 @@ import QuartzCore
 /// Full screen emulation. Vulkan draws into a Metal layer; when the core falls
 /// back to its software rasteriser its frames arrive as bitmaps instead. Both
 /// paths share the same overlay so the numbers can always be read.
+///
+/// The game image is never underneath a control: the controls are laid out in the
+/// margins the aspect-fit image leaves, and only their own frames take touches.
 struct PlaybackScreen: View {
     @ObservedObject var session: PlaybackSession
+    @ObservedObject private var store = SettingsStore.shared
+    @ObservedObject private var controllers = ControllerMonitor.shared
     @Environment(\.presentationMode) private var presentationMode
     @State private var showsOverlay = true
+    @State private var showsDiagnostics = false
+
+    private var settings: EmulationSettings { store.global.emulation }
+
+    /// The screen ignores the safe area, so the geometry reader reports none. The
+    /// window still knows where the home indicator and the rounded corners are.
+    private var safeInsets: UIEdgeInsets {
+        let window = UIApplication.shared.windows.first { $0.isKeyWindow }
+        return window?.safeAreaInsets ?? .zero
+    }
 
     var body: some View {
+        GeometryReader { geometry in
+            let metrics = ControlMetrics.make(in: geometry.size,
+                                              safeArea: safeInsets,
+                                              scale: CGFloat(settings.clampedScale))
+            ZStack {
+                Color.black
+
+                surface
+                    .frame(width: metrics.game.width, height: metrics.game.height)
+                    .position(x: metrics.game.midX, y: metrics.game.midY)
+
+                TouchSurface { x, y, pressed in
+                    session.setPointer(x: x, y: y, pressed: pressed)
+                }
+                .frame(width: metrics.game.width, height: metrics.game.height)
+                .position(x: metrics.game.midX, y: metrics.game.midY)
+
+                if !controllers.isConnected {
+                    ControlsOverlay(setup: controlSetup(metrics: metrics, safe: safeInsets),
+                                    onButton: { mask, pressed in
+                                        session.setButton(mask, pressed: pressed)
+                                    },
+                                    onStick: { x, y in
+                                        session.setCirclePad(x: Int(x * 32767), y: Int(y * 32767))
+                                    })
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+
+                if case .failed(let reason) = session.phase {
+                    failure(reason)
+                } else if session.image == nil && !session.usesHardwareVideo {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                }
+
+                if showsOverlay {
+                    overlay
+                } else {
+                    hudChip.padding(12)
+                        .frame(width: geometry.size.width, height: geometry.size.height,
+                               alignment: .topTrailing)
+                }
+            }
+            .statusBar(hidden: true)
+        }
+        .ignoresSafeArea()
+        .background(Color.black)
+        .onAppear {
+            session.startIfNeeded()
+            ControllerMonitor.shared.session = session
+            ControllerMonitor.shared.refresh()
+        }
+        .onDisappear {
+            session.releasePointer()
+            session.stop()
+            ControllerMonitor.shared.session = nil
+        }
+        .onChange(of: settings.volume) { value in
+            AudioOutput.shared.setVolume(Float(value))
+        }
+        .onChange(of: settings.isMuted) { value in
+            AudioOutput.shared.setMuted(value)
+        }
+        .sheet(isPresented: $showsDiagnostics) {
+            AudioDiagnosticsView()
+        }
+    }
+
+    /// Set when the audio graph refused to build. A silent game that says why is
+    /// better than a silent game that looks broken.
+    private var audioFailure: String? {
+        let counters = AudioOutput.shared.snapshot()
+        guard !counters.available else { return nil }
+        let name = counters.failureName ?? "audio unavailable"
+        let reason = counters.failureReason ?? ""
+        return "audio off · \(name): \(reason)"
+    }
+
+    private func controlSetup(metrics: ControlMetrics,
+                              safe: UIEdgeInsets) -> OnScreenControlsView.Setup {
+        var setup = OnScreenControlsView.Setup()
+        setup.opacity = CGFloat(settings.clampedOpacity)
+        setup.scale = CGFloat(settings.clampedScale)
+        setup.haptics = settings.hapticsEnabled
+        setup.landscape = metrics.landscape
+        setup.game = metrics.game
+        setup.safeArea = safe
+        return setup
+    }
+
+    private var surface: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
             MetalSurfaceView { layer in
                 session.attach(metalLayer: layer)
             }
-            .ignoresSafeArea()
-
             if !session.usesHardwareVideo, let image = session.image {
                 FrameImageView(image: image)
-                    .ignoresSafeArea()
             }
-
-            if case .failed(let reason) = session.phase {
-                failure(reason)
-            } else if session.image == nil && !session.usesHardwareVideo {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-            }
-
-            if showsOverlay {
-                overlay
-            }
-            controls
         }
-        .statusBar(hidden: true)
-        .onAppear { session.startIfNeeded() }
-        .onDisappear { session.stop() }
+        .clipped()
     }
 
     private func failure(_ reason: String) -> some View {
@@ -62,20 +150,35 @@ struct PlaybackScreen: View {
     // MARK: - Overlay
 
     private var overlay: some View {
-        VStack {
+        VStack(spacing: 0) {
             HStack(alignment: .top) {
                 statistics
-                Spacer()
-                Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 40, height: 40)
-                        .background(Circle().fill(Color.black.opacity(0.5)))
+                Spacer(minLength: 12)
+                VStack(spacing: 8) {
+                    Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(Color.black.opacity(0.5)))
+                    }
+                    .accessibilityLabel("Stop emulation")
+
+                    hudChip
                 }
-                .accessibilityLabel("Stop emulation")
             }
-            Spacer()
+
+            Spacer(minLength: 0)
+
+            if let message = session.saveStateMessage {
+                Text(message)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.black.opacity(0.72)))
+                    .padding(.bottom, 10)
+            }
             if let message = session.coreMessage {
                 Text(message)
                     .font(.system(size: 12, weight: .medium))
@@ -86,8 +189,20 @@ struct PlaybackScreen: View {
                     .padding(.horizontal, 24)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private var hudChip: some View {
+        Button(action: { showsOverlay.toggle() }) {
+            Text("HUD")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(.green.opacity(0.9))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.black.opacity(0.5)))
+        }
+        .accessibilityLabel(showsOverlay ? "Hide diagnostics" : "Show diagnostics")
     }
 
     private var statistics: some View {
@@ -95,105 +210,62 @@ struct PlaybackScreen: View {
             statistic("FPS", String(format: "%.1f", session.framesPerSecond))
             statistic("Target", String(format: "%.1f fps", session.targetFramesPerSecond))
             statistic("Speed", String(format: "%.1f%% of real time", session.speedPercent))
+            statistic("Limit", session.speedLimitTitle)
             statistic("Frame", String(format: "%.1f ms", session.frameMilliseconds))
             statistic("Renderer", session.rendererName)
             statistic("Resolution", "\(session.resolutionScale)x · \(session.layout.title)")
             statistic("Frames", "\(session.deliveredFrames)")
+
+            Divider().background(Color.green.opacity(0.25)).padding(.vertical, 2)
+
+            statistic("Audio", session.audio.state)
+            if let failure = audioFailure {
+                Text(failure)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 258, alignment: .leading)
+                    .padding(.bottom, 2)
+            }
+            statistic("Audio cbs", String(format: "%.1f/s · batch", session.audio.batchCallbacksPerSecond))
+            statistic("Audio made", String(format: "%.0f/s · %.0f Hz", session.audio.producedPerSecond, session.audio.coreSampleRate))
+            statistic("Audio used", String(format: "%.0f/s", session.audio.consumedPerSecond))
+            statistic("Audio buf", String(format: "%.0f ms · %llu under · %llu drop",
+                                         session.audio.bufferedMilliseconds,
+                                         session.audio.underruns,
+                                         session.audio.dropped))
+
+            HStack(spacing: 6) {
+                statisticButton("Save state") { session.saveState() }
+                statisticButton("Load state") { session.loadState() }
+                statisticButton("Diagnostics") { showsDiagnostics = true }
+            }
+            .padding(.top, 4)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.6)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.62)))
     }
 
     private func statistic(_ label: String, _ value: String) -> some View {
         HStack(spacing: 6) {
             Text(label)
                 .foregroundColor(.green.opacity(0.7))
-                .frame(width: 74, alignment: .leading)
+                .frame(width: 78, alignment: .leading)
             Text(value)
                 .foregroundColor(.green)
         }
         .font(.system(size: 11, weight: .medium, design: .monospaced))
     }
 
-    // MARK: - Controls
-
-    private var controls: some View {
-        VStack {
-            Spacer()
-            HStack(alignment: .bottom) {
-                dpad
-                Spacer()
-                HStack(spacing: 12) {
-                    VStack(spacing: 8) {
-                        PadButton(label: "X", mask: PlaybackSession.Pad.x, session: session)
-                        PadButton(label: "Y", mask: PlaybackSession.Pad.y, session: session)
-                    }
-                    VStack(spacing: 8) {
-                        PadButton(label: "B", mask: PlaybackSession.Pad.b, session: session)
-                        PadButton(label: "A", mask: PlaybackSession.Pad.a, session: session)
-                    }
-                }
-                Spacer()
-                VStack(spacing: 8) {
-                    PadButton(label: "Start", mask: PlaybackSession.Pad.start, session: session)
-                    PadButton(label: "Select", mask: PlaybackSession.Pad.select, session: session)
-                    Button(action: { showsOverlay.toggle() }) {
-                        Text("HUD")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.75))
-                            .frame(width: 58, height: 30)
-                            .background(Capsule().fill(Color.white.opacity(0.12)))
-                    }
-                }
-            }
-            .padding(.horizontal, 28)
-            .padding(.bottom, 26)
+    private func statisticButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(.green)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.green.opacity(0.16)))
         }
-    }
-
-    private var dpad: some View {
-        VStack(spacing: 8) {
-            PadButton(label: "▲", mask: PlaybackSession.Pad.up, session: session)
-            HStack(spacing: 8) {
-                PadButton(label: "◀", mask: PlaybackSession.Pad.left, session: session)
-                PadButton(label: "▼", mask: PlaybackSession.Pad.down, session: session)
-                PadButton(label: "▶", mask: PlaybackSession.Pad.right, session: session)
-            }
-        }
-    }
-}
-
-private struct PadButton: View {
-    let label: String
-    let mask: UInt32
-    let session: PlaybackSession
-    @State private var isPressed = false
-
-    var body: some View {
-        Text(label)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.white.opacity(0.9))
-            .frame(width: 52, height: 44)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(isPressed ? 0.32 : 0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-            )
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard !isPressed else { return }
-                        isPressed = true
-                        session.setButton(mask, pressed: true)
-                    }
-                    .onEnded { _ in
-                        isPressed = false
-                        session.setButton(mask, pressed: false)
-                    }
-            )
     }
 }
 
@@ -228,8 +300,7 @@ final class MetalContainerView: UIView {
     }
 
     required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        backgroundColor = .black
+        fatalError("init(coder:) has not been implemented")
     }
 }
 
@@ -258,8 +329,86 @@ final class FrameContainerView: UIView {
     }
 
     required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        backgroundColor = .black
-        layer.contentsGravity = .resizeAspect
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+/// The bottom screen is a touchscreen. The core maps a normalised pointer onto the
+/// bottom screen itself, so this only has to say where the finger is inside the
+/// frame the core is producing.
+struct TouchSurface: UIViewRepresentable {
+    let onTouch: (CGFloat, CGFloat, Bool) -> Void
+
+    func makeUIView(context: Context) -> TouchSurfaceView {
+        let view = TouchSurfaceView()
+        view.onTouch = onTouch
+        return view
+    }
+
+    func updateUIView(_ view: TouchSurfaceView, context: Context) {
+        view.onTouch = onTouch
+    }
+}
+
+final class TouchSurfaceView: UIView {
+    var onTouch: ((CGFloat, CGFloat, Bool) -> Void)?
+    private var activeTouch: UITouch?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isMultipleTouchEnabled = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        activeTouch = touch
+        report(touch, pressed: true)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        report(touch, pressed: true)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        finish(touches)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        finish(touches)
+    }
+
+    private func finish(_ touches: Set<UITouch>) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        activeTouch = nil
+        onTouch?(0, 0, false)
+    }
+
+    /// The frame is letterboxed inside this view exactly as the present path
+    /// letterboxes it inside the drawable, so the mapping is the same maths.
+    private func report(_ touch: UITouch, pressed: Bool) {
+        let point = touch.location(in: self)
+        let size = bounds.size
+        guard size.width > 1, size.height > 1 else { return }
+
+        let source = AZCoreSourceSize()
+        let sourceWidth = source.width > 1 ? source.width : 400
+        let sourceHeight = source.height > 1 ? source.height : 480
+        let scale = min(size.width / sourceWidth, size.height / sourceHeight)
+        guard scale > 0 else { return }
+
+        let drawnWidth = sourceWidth * scale
+        let drawnHeight = sourceHeight * scale
+        let originX = (size.width - drawnWidth) / 2
+        let originY = (size.height - drawnHeight) / 2
+
+        let x = ((point.x - originX) / drawnWidth) * 2 - 1
+        let y = ((point.y - originY) / drawnHeight) * 2 - 1
+        onTouch?(x, y, pressed)
     }
 }
