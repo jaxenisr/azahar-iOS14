@@ -64,6 +64,8 @@ exact build settings (deployment target 14.0, arm64 only, no chained fixups).
 
 ## Credits
 
-Built by jaxenisr. Not affiliated with the Azahar project. Azahar is licensed
-GPLv3+; this app is GPLv3 and the full source for every release is this repository
-at that release's tag.
+Built by us.
+This is a hobby project:
+built with an AI assistant,
+tested by one person on one iPad 8th gen.
+It comes with no guarantees.
