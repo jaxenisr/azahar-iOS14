@@ -55,11 +55,19 @@ final class PlaybackSession: ObservableObject, Identifiable {
 
     @Published private(set) var phase: Phase = .running
     @Published private(set) var image: CGImage?
+    /// Frames the emulation thread ran, per second.
     @Published private(set) var framesPerSecond: Double = 0
+    /// Frames whose picture was different from the one before it, per second.
+    /// The gap between this and `framesPerSecond` is the core re-presenting an
+    /// image it already produced.
+    @Published private(set) var gameFramesPerSecond: Double = 0
     @Published private(set) var targetFramesPerSecond: Double = 0
     @Published private(set) var speedPercent: Double = 0
     @Published private(set) var frameMilliseconds: Double = 0
     @Published private(set) var deliveredFrames: UInt64 = 0
+    /// Hash of the last frame the callback saw. Equal hashes on two consecutive
+    /// frames mean the same picture arrived twice.
+    @Published private(set) var frameHash: UInt64 = 0
     @Published private(set) var coreMessage: String?
     @Published private(set) var rendererName = "starting"
     @Published private(set) var usesHardwareVideo = false
@@ -83,6 +91,11 @@ final class PlaybackSession: ObservableObject, Identifiable {
     private var thread: Thread?
     private var buttons: UInt32 = 0
     private var wantsToRun = false
+
+    /// Frame hashing, emulation thread only: written by the frame callback and
+    /// read by the report in the run loop, both on that thread.
+    private var lastFrameHash: UInt64 = 0
+    private var changedFrames: UInt64 = 0
 
     private let latestLock = NSLock()
     private var latestImage: CGImage?
@@ -216,6 +229,55 @@ final class PlaybackSession: ObservableObject, Identifiable {
 
     // MARK: - Frame delivery
 
+    /// One frame from the core. The hash is taken here, where the pixels are, and
+    /// compared with the previous frame: that is the only place the difference
+    /// between "a frame ran" and "the picture changed" can be seen.
+    ///
+    /// The Vulkan path presents straight into the Metal layer and hands this no
+    /// image, so on that path there is nothing to hash and the core's own frame
+    /// counter stands in: Rate and Game then agree, and the gap this row exists to
+    /// show does not appear. The software path is where the two diverge.
+    fileprivate func noteFrame(_ image: CGImage?) {
+        let hash: UInt64
+        if let image = image {
+            hash = PlaybackSession.hash(of: image)
+        } else {
+            hash = AZCoreFramesDelivered()
+        }
+        if hash != lastFrameHash {
+            lastFrameHash = hash
+            changedFrames &+= 1
+        }
+    }
+
+    /// A cheap content hash: size plus a strided sample of the pixels. Sampling
+    /// keeps it to a few thousand reads a frame, which is affordable at 60 Hz, and
+    /// any change larger than a handful of pixels still moves it.
+    private static func hash(of image: CGImage) -> UInt64 {
+        var hash: UInt64 = 1469598103934665603
+        func mix(_ value: UInt64) {
+            hash = (hash ^ value) &* 1099511628211
+        }
+        mix(UInt64(image.width))
+        mix(UInt64(image.height))
+
+        guard let data = image.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else {
+            return hash
+        }
+        let length = CFDataGetLength(data)
+        guard length > 0 else { return hash }
+
+        let samples = 4096
+        let step = max(length / samples, 1)
+        var index = 0
+        while index < length {
+            mix(UInt64(bytes[index]))
+            index += step
+        }
+        return hash
+    }
+
     fileprivate func publishFrame(_ image: CGImage) {
         latestLock.lock()
         latestImage = image
@@ -321,8 +383,15 @@ final class PlaybackSession: ObservableObject, Identifiable {
 
         var reportStart = CACurrentMediaTime()
         var framesAtReport: UInt64 = 0
+        var changedAtReport: UInt64 = 0
         var delivered: UInt64 = 0
         var emulatedSeconds = 0.0
+
+        // The once-a-second log: two numbers, the hash they came from, and the
+        // wall time between them, so the log can be read without the overlay.
+        var logStart = CACurrentMediaTime()
+        var loggedFrames: UInt64 = 0
+        var loggedChanges: UInt64 = 0
 
         var lastBatchCalls = AZCoreAudioBatchCalls()
         var lastProduced: UInt64 = 0
@@ -358,6 +427,8 @@ final class PlaybackSession: ObservableObject, Identifiable {
             if elapsed >= 0.5 {
                 let frames = delivered &- framesAtReport
                 let measuredFps = elapsed > 0 ? Double(frames) / elapsed : 0
+                let changed = changedFrames &- changedAtReport
+                let gameFps = elapsed > 0 ? Double(changed) / elapsed : 0
                 let emulatedMs = frames > 0 ? (emulatedSeconds / Double(frames)) * 1000 : 0
                 // Speed is how much emulated time the thread produced per second
                 // of wall time, not how long retro_run took: the pacing sleep is
@@ -383,8 +454,11 @@ final class PlaybackSession: ObservableObject, Identifiable {
                 lastProduced = audioCounters.produced
                 lastConsumed = audioCounters.consumed
 
+                let hash = lastFrameHash
                 publish { session in
                     session.framesPerSecond = measuredFps
+                    session.gameFramesPerSecond = gameFps
+                    session.frameHash = hash
                     session.targetFramesPerSecond = targetFps
                     session.speedPercent = achieved
                     session.frameMilliseconds = emulatedMs
@@ -398,8 +472,23 @@ final class PlaybackSession: ObservableObject, Identifiable {
                 }
 
                 framesAtReport = delivered
+                changedAtReport = changedFrames
                 emulatedSeconds = 0
                 reportStart = reportStart + elapsed
+
+                // Once a second, both numbers and the hash, so what the overlay
+                // shows can be lined up with what the game did at that moment.
+                let logElapsed = CACurrentMediaTime() - logStart
+                if logElapsed >= 1.0 {
+                    let rate = Double(delivered &- loggedFrames) / logElapsed
+                    let game = Double(changedFrames &- loggedChanges) / logElapsed
+                    let line = String(format: "AZFRAME rate=%.2f game=%.2f hash=%016llx frames=%llu",
+                                      rate, game, hash, delivered)
+                    NSLog("%@", line)
+                    loggedFrames = delivered
+                    loggedChanges = changedFrames
+                    logStart = CACurrentMediaTime()
+                }
             }
         }
 
@@ -471,7 +560,11 @@ private func session(from context: UnsafeMutableRawPointer?) -> PlaybackSession?
 }
 
 private let playbackFrameCallback: AZCoreFrameCallback = { image, context in
-    guard let image = image, let session = session(from: context) else { return }
+    guard let session = session(from: context) else { return }
+    // The hash is taken here, in the callback, before the image is handed on: it
+    // is the only place a frame's pixels are available.
+    session.noteFrame(image)
+    guard let image = image else { return }
     session.publishFrame(image)
 }
 
