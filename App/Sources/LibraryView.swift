@@ -33,6 +33,8 @@ struct LibraryView: View {
     @State private var selected: GameEntry?
     @State private var menuGame: GameEntry?
     @State private var mode: LibraryMode = .games
+    /// The cover and the pane's hero share this namespace.
+    @Namespace private var hero
 
     private var isCompact: Bool { sizeClass == .compact }
 
@@ -83,6 +85,7 @@ struct LibraryView: View {
                         .animation(Design.Motion.panel)
                 }
             }
+            .animation(Design.Motion.panel)
         }
         .background(Design.Palette.background.ignoresSafeArea())
         .sheet(isPresented: $isImporting) {
@@ -203,7 +206,7 @@ struct LibraryView: View {
     private var gameGrid: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Design.Space.xl) {
-                ForEach(sections) { section in
+                ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
                     VStack(alignment: .leading, spacing: Design.Space.s) {
                         Text(section.letter)
                             .font(Design.Fonts.section)
@@ -214,11 +217,15 @@ struct LibraryView: View {
                                           name: game.title,
                                           meta: game.subtitle,
                                           aspect: 1,
+                                          heroNamespace: hero,
+                                          heroID: game.id,
+                                          heroSource: selected?.id != game.id,
                                           onOpen: { openDetail(game) },
                                           onMenu: { menuGame = game })
                             }
                         }
                     }
+                    .entrance(index)
                 }
             }
             .padding(.horizontal, Design.Space.sideMargin)
@@ -249,12 +256,14 @@ struct LibraryView: View {
                         .padding(.vertical, 2)
                     }
                 }
+                .entrance(0)
 
                 Text("A decrypted dump boots with nothing else. Encrypted content needs sysdata/aes_keys.txt, and seeded titles need sysdata/seeddb.bin. Mii data and system saves live under nand/, which the core creates itself.")
                     .font(Design.Fonts.caption)
                     .foregroundColor(Design.Palette.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Design.Space.sideMargin)
+                    .entrance(1)
             }
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -289,7 +298,9 @@ struct LibraryView: View {
     /// narrow split has no room for that, so the pane is the whole width.
     private func detailPane(for game: GameEntry, available: CGFloat) -> some View {
         let width = isCompact ? available : min(max(available * 0.55, 420), 620)
-        return GameDetailView(game: game, onClose: { closeDetail() })
+        return GameDetailView(game: game,
+                              onClose: { closeDetail() },
+                              heroNamespace: hero)
             .frame(width: width)
             .background(Design.Palette.background)
             .clipShape(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous))
@@ -345,6 +356,7 @@ struct LibraryView: View {
 struct GameDetailView: View {
     let game: GameEntry
     var onClose: (() -> Void)? = nil
+    var heroNamespace: Namespace.ID? = nil
 
     @EnvironmentObject private var library: GameLibrary
     @ObservedObject private var store = SettingsStore.shared
@@ -412,8 +424,10 @@ struct GameDetailView: View {
                                         .contentShape(Capsule())
                                 }
                                 .buttonStyle(PressableStyle())
+                                .pressHaptic()
                             }
                         }
+                        .entrance(0)
 
                         SettingsCard("Save state") {
                             HStack {
@@ -427,12 +441,14 @@ struct GameDetailView: View {
                                 .foregroundColor(Design.Palette.secondaryInk)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        .entrance(1)
 
                         SettingsCard("File") {
                             infoRow("Name", game.url.lastPathComponent)
                             infoRow("Size", game.subtitle)
                             infoRow("Core", library.coreDescription)
                         }
+                        .entrance(2)
 
                         Button(action: remove) {
                             Text("Remove from library")
@@ -442,6 +458,8 @@ struct GameDetailView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(PressableStyle(scale: 0.98))
+                        .pressHaptic()
+                        .entrance(3)
                     }
                 }
                 .padding(.top, Design.Space.xxl)
@@ -462,16 +480,22 @@ struct GameDetailView: View {
         .padding(Design.Space.m)
     }
 
+    /// The artwork the cover handed over, drawn at the pane's size under the same
+    /// geometry id, so it grows rather than arriving twice.
     private var hero: some View {
         VStack(spacing: Design.Space.s) {
-            if let icon = game.icon {
-                Image(uiImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 132, height: 132)
-                    .clipShape(RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous))
-                    .designShadow(Design.Elevation.card)
+            Group {
+                if let icon = game.icon {
+                    Image(uiImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 132, height: 132)
+                        .clipShape(RoundedRectangle(cornerRadius: Design.Radius.cover, style: .continuous))
+                        .designShadow(Design.Elevation.card)
+                }
             }
+            .matchedGeometryEffect(id: game.id, in: heroNamespace ?? Namespace().wrappedValue, isSource: true)
+
             Text(game.title)
                 .font(.system(size: 24, weight: .bold))
                 .multilineTextAlignment(.center)
@@ -482,6 +506,7 @@ struct GameDetailView: View {
                 .foregroundColor(Design.Palette.secondaryInk)
         }
         .frame(maxWidth: .infinity)
+        .entrance(0)
     }
 
     private var playButton: some View {
@@ -502,6 +527,7 @@ struct GameDetailView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(PressableStyle(scale: 0.99))
+        .pressHaptic()
         .padding(.horizontal, Design.Space.sideMargin)
     }
 
