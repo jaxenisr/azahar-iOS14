@@ -179,6 +179,12 @@ final class AudioOutput {
         }
     }
 
+    /// Configures the session ahead of the first game, so the first frames of
+    /// audio are not spent waiting for activation.
+    func prepare() {
+        activateSession()
+    }
+
     func stop() {
         lock.lock()
         running = false
