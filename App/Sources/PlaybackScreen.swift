@@ -37,17 +37,17 @@ struct PlaybackScreen: View {
         return source.width / source.height
     }
 
-    private func layout(in size: CGSize) -> PlaybackGeometry {
-        PlaybackGeometry.make(in: size,
-                              safe: safeInsets,
-                              scale: CGFloat(settings.clampedScale),
-                              aspect: sourceAspect,
-                              hud: showsOverlay ? .full : .compact)
-    }
-
     var body: some View {
         GeometryReader { geometry in
-            let metrics = layout(in: geometry.size)
+            let hudMetrics = HUDMetrics.make(labels: hudLabels,
+                                             widestValues: hudWidestValues,
+                                             columns: geometry.size.width > geometry.size.height ? 1 : 2)
+            let metrics = PlaybackGeometry.make(in: geometry.size,
+                                                safe: safeInsets,
+                                                scale: CGFloat(settings.clampedScale),
+                                                aspect: sourceAspect,
+                                                hud: showsOverlay ? .full : .compact,
+                                                hudMetrics: hudMetrics)
 
             ZStack(alignment: .topLeading) {
                 Color.black
@@ -83,7 +83,7 @@ struct PlaybackScreen: View {
                         .frame(width: geometry.size.width, height: geometry.size.height)
                 }
 
-                hud(metrics)
+                hud(hudMetrics)
                     .frame(width: metrics.hud.width, height: metrics.hud.height, alignment: .topLeading)
                     .offset(x: metrics.hud.minX, y: metrics.hud.minY)
             }
@@ -178,9 +178,9 @@ struct PlaybackScreen: View {
     // MARK: - HUD
 
     @ViewBuilder
-    private func hud(_ metrics: PlaybackGeometry) -> some View {
+    private func hud(_ hudMetrics: HUDMetrics) -> some View {
         if showsOverlay {
-            hudCard(metrics)
+            hudCard(hudMetrics)
         } else {
             hudPill
         }
@@ -202,30 +202,27 @@ struct PlaybackScreen: View {
         .overlay(Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1))
     }
 
-    private func hudCard(_ metrics: PlaybackGeometry) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func hudCard(_ hudMetrics: HUDMetrics) -> some View {
+        VStack(alignment: .leading, spacing: HUDMetrics.rowSpacing) {
             HStack(spacing: 6) {
-                Text("PERFORMANCE")
+                Text(HUDMetrics.heading)
                     .font(.system(size: 10, weight: .semibold))
                     .kerning(0.7)
                     .foregroundColor(.white.opacity(0.42))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 Spacer(minLength: 4)
                 hudIcon("chevron.up", label: "Hide diagnostics") { showsOverlay = false }
                 hudIcon("xmark", label: "Stop emulation") { presentationMode.wrappedValue.dismiss() }
             }
+            .frame(height: HUDMetrics.headerHeight)
 
-            if metrics.hudColumns > 1 {
-                let columns = [GridItem(.flexible(), alignment: .leading),
-                               GridItem(.flexible(), alignment: .leading)]
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 3) {
-                    ForEach(hudRows.indices, id: \.self) { index in
-                        statistic(hudRows[index].0, hudRows[index].1)
-                    }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(hudRows.indices, id: \.self) { index in
-                        statistic(hudRows[index].0, hudRows[index].1)
+            HStack(alignment: .top, spacing: HUDMetrics.columnGap) {
+                ForEach(0..<hudMetrics.columns, id: \.self) { column in
+                    VStack(alignment: .leading, spacing: HUDMetrics.rowGap) {
+                        ForEach(hudMetrics.indices(in: column), id: \.self) { index in
+                            statistic(hudRows[index].0, hudRows[index].1, metrics: hudMetrics)
+                        }
                     }
                 }
             }
@@ -234,6 +231,7 @@ struct PlaybackScreen: View {
                 Text(failure)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundColor(.orange)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -242,8 +240,9 @@ struct PlaybackScreen: View {
                 statisticButton("Load") { session.loadState() }
                 statisticButton("Audio") { showsDiagnostics = true }
             }
+            .frame(height: HUDMetrics.buttonsHeight)
         }
-        .padding(10)
+        .padding(HUDMetrics.padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.black.opacity(0.62)))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -259,10 +258,10 @@ struct PlaybackScreen: View {
             ("Limit", session.speedLimitTitle),
             ("Frame", String(format: "%.1f ms", session.frameMilliseconds)),
             ("Target", String(format: "%.1f", session.targetFramesPerSecond)),
-            ("Renderer", session.rendererName),
-            ("Layout", "\(session.resolutionScale)x · \(session.layout.title)"),
+            ("Renderer", rendererToken),
+            ("Layout", "\(session.resolutionScale)x \(session.layout.title)"),
             ("Frames", "\(session.deliveredFrames)"),
-            ("Audio", session.audio.state),
+            ("Audio", audioToken),
             ("Cbs", String(format: "%.0f/s", session.audio.batchCallbacksPerSecond)),
             ("Made", String(format: "%.0f/s", session.audio.producedPerSecond)),
             ("Used", String(format: "%.0f/s", session.audio.consumedPerSecond)),
@@ -271,17 +270,44 @@ struct PlaybackScreen: View {
         ]
     }
 
-    private func statistic(_ label: String, _ value: String) -> some View {
-        HStack(spacing: 5) {
+    private var hudLabels: [String] { hudRows.map { $0.0 } }
+
+    /// The widest each value in `hudRows` can get. The card is sized from these
+    /// rather than from the numbers on screen, so a value growing a digit does not
+    /// resize the card -- and with it the picture -- in the middle of a game.
+    private var hudWidestValues: [String] {
+        ["60.0", "100.0%", "Unlimited", "16.7 ms", "60.0", "Software",
+         "4x Side by side", "12345678", "playing", "2400/s", "40000/s", "40000/s",
+         "240.0 ms", "9999"]
+    }
+
+    /// Which renderer is running, in one word: `rendererName` is either
+    /// "Vulkan (MoltenVK): <device>" or the software path with its reason, and the
+    /// rest of that string is long enough to push every other row off the card.
+    private var rendererToken: String {
+        session.rendererName.split(separator: " ").first.map(String.init) ?? "—"
+    }
+
+    /// The audio state in one word: "playing · 32728 -> 44100 Hz · speaker" is a
+    /// sentence, and the sheet behind the Audio button has all of it.
+    private var audioToken: String {
+        session.audio.state.split(separator: "·").first
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? session.audio.state
+    }
+
+    private func statistic(_ label: String, _ value: String, metrics: HUDMetrics) -> some View {
+        HStack(spacing: HUDMetrics.labelGap) {
             Text(label)
                 .foregroundColor(.green.opacity(0.6))
-                .frame(width: 44, alignment: .leading)
+                .frame(width: metrics.labelWidth, alignment: .leading)
+                .lineLimit(1)
             Text(value)
                 .foregroundColor(.green)
+                .frame(width: metrics.valueWidth, alignment: .trailing)
                 .lineLimit(1)
-                .minimumScaleFactor(0.55)
         }
         .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+        .frame(height: HUDMetrics.rowHeight)
     }
 
     private func hudIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {

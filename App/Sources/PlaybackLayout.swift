@@ -205,7 +205,7 @@ struct PlaybackGeometry {
         if ratio > areaRatio {
             size = CGSize(width: area.width, height: area.width / ratio)
         } else {
-            size = CGSize(height: area.height * ratio, height: area.height)
+            size = CGSize(width: area.height * ratio, height: area.height)
         }
         return CGRect(x: area.midX - size.width / 2,
                       y: area.midY - size.height / 2,
