@@ -44,7 +44,7 @@ struct LibraryView: View {
                     .resizable()
                     .scaledToFill()
                     .blur(radius: 90)
-                    .opacity(0.45)
+                    .opacity(0.4)
                     .ignoresSafeArea()
             }
             BlurBackdrop().ignoresSafeArea()
@@ -55,14 +55,14 @@ struct LibraryView: View {
     private var header: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Library")
-                    .font(.system(size: 32, weight: .bold))
+                Text("Games")
+                    .font(.system(size: 34, weight: .bold))
                     .foregroundColor(.white)
                 Text(library.games.isEmpty
                      ? "No titles yet"
                      : "\(library.games.count) title\(library.games.count == 1 ? "" : "s")")
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.55))
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.5))
             }
             Spacer()
             Button(action: { isImporting = true }) {
@@ -74,9 +74,9 @@ struct LibraryView: View {
             }
             .accessibilityLabel("Import a game")
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 18)
+        .padding(.horizontal, 26)
+        .padding(.top, 22)
+        .padding(.bottom, 16)
     }
 
     @ViewBuilder
@@ -90,8 +90,8 @@ struct LibraryView: View {
                         GameTile(game: game) { selected = game }
                     }
                 }
-                .padding(.horizontal, 28)
-                .padding(.bottom, 40)
+                .padding(.horizontal, 26)
+                .padding(.bottom, 100)
             }
         }
     }
@@ -111,6 +111,7 @@ struct LibraryView: View {
                 .foregroundColor(.white.opacity(0.45))
                 .padding(.horizontal, 40)
             Spacer()
+            Spacer()
         }
     }
 }
@@ -123,8 +124,8 @@ struct GameTile: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 9) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Color.white.opacity(0.07))
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
                     if let icon = game.icon {
                         Image(uiImage: icon)
                             .resizable()
@@ -139,7 +140,7 @@ struct GameTile: View {
                 }
                 .aspectRatio(1, contentMode: .fit)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
 
@@ -160,60 +161,108 @@ struct GameTile: View {
 struct GameDetailView: View {
     let game: GameEntry
     @EnvironmentObject private var library: GameLibrary
+    @ObservedObject private var store = SettingsStore.shared
     @Environment(\.presentationMode) private var presentationMode
     @State private var session: PlaybackSession?
-    @State private var resolutionScale = 1
-    @State private var layout: PlaybackLayout = .largeScreen
+
+    private var gameOverride: SettingsStore.GameOverride { store.override(for: game.id) }
+    private var effective: EmulationSettings { store.settings(for: game.id) }
 
     var body: some View {
         ZStack {
-            Color(red: 0.06, green: 0.07, blue: 0.09).ignoresSafeArea()
+            Color(red: 0.05, green: 0.06, blue: 0.08).ignoresSafeArea()
             ScrollView {
-                VStack(spacing: 20) {
-                    if let icon = game.icon {
-                        Image(uiImage: icon)
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: 128, height: 128)
-                            .cornerRadius(16)
-                            .padding(.top, 28)
-                    }
-                    Text(game.title)
-                        .font(.system(size: 22, weight: .bold))
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 24)
-                    Text(game.subtitle)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.5))
+                VStack(spacing: 18) {
+                    hero
+                    playButton
 
-                    infoRow("File", game.url.lastPathComponent)
-                    infoRow("Core", library.coreDescription)
-                    infoRow("Core check", library.coreStatus)
-
-                    Button(action: {
-                        session = PlaybackSession(game: game,
-                                                  coreDirectory: library.coreDirectory,
-                                                  resolutionScale: resolutionScale,
-                                                  layout: layout)
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "play.fill")
-                            Text("Play")
+                    SettingsCard("This title") {
+                        SettingRow("Resolution scale", subtitle: gameOverride.resolutionScale == nil ? "Following the global value" : "Overridden for this title") {
+                            MenuChip(title: gameOverride.resolutionScale.map { "\($0)x" } ?? "Global") {
+                                Button("Use global") { update { $0.resolutionScale = nil } }
+                                ForEach(1...4, id: \.self) { scale in
+                                    Button("\(scale)x") { update { $0.resolutionScale = scale } }
+                                }
+                            }
                         }
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: 220)
-                        .padding(.vertical, 12)
-                        .background(Capsule().fill(Color.white.opacity(0.16)))
+                        SettingRow("Screen layout", subtitle: gameOverride.layout == nil ? "Following the global value" : "Overridden for this title") {
+                            MenuChip(title: gameOverride.layout?.title ?? "Global") {
+                                Button("Use global") { update { $0.layout = nil } }
+                                ForEach(PlaybackLayout.allCases) { layout in
+                                    Button(layout.title) { update { $0.layout = layout } }
+                                }
+                            }
+                        }
+                        SettingRow("Emulation speed", subtitle: gameOverride.speed == nil ? "Following the global value" : "Overridden for this title") {
+                            MenuChip(title: gameOverride.speed?.title ?? "Global") {
+                                Button("Use global") { update { $0.speed = nil } }
+                                ForEach(PlaybackSpeed.allCases) { speed in
+                                    Button(speed.title) { update { $0.speed = speed } }
+                                }
+                            }
+                        }
+                        SettingRow("3DS CPU clock", subtitle: gameOverride.cpuClockPercent == nil ? "Following the global value" : "Overridden for this title") {
+                            MenuChip(title: gameOverride.cpuClockPercent.map { "\($0)%" } ?? "Global") {
+                                Button("Use global") { update { $0.cpuClockPercent = nil } }
+                                ForEach(EmulationSettings.cpuClockChoices, id: \.self) { percent in
+                                    Button("\(percent)%") { update { $0.cpuClockPercent = percent } }
+                                }
+                            }
+                        }
+
+                        if store.hasOverride(for: game.id) {
+                            Button(action: { store.clearOverride(for: game.id) }) {
+                                Text("Reset to global")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.75))
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 32)
+                                    .background(Capsule().fill(Color.white.opacity(0.09)))
+                            }
+                        }
                     }
-                    .padding(.top, 4)
 
-                    resolutionPicker
+                    SettingsCard("Save state") {
+                        HStack {
+                            Text(PlaybackSession.stateDescription(for: game, coreDirectory: library.coreDirectory))
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.85))
+                            Spacer()
+                        }
+                        Text("One slot per title. Save and load it from the HUD while the game is running.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.42))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                    layoutPicker
+                    SettingsCard("System files") {
+                        ForEach(library.coreFileStatus()) { status in
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: status.present ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(status.present ? Color.green.opacity(0.85) : Color.orange)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(status.id)
+                                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.88))
+                                    Text(status.present ? status.note : "missing · \(status.note)")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(status.present ? .white.opacity(0.42) : .orange.opacity(0.9))
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        Text("A decrypted dump boots with nothing else. Encrypted content needs sysdata/aes_keys.txt, and seeded titles need sysdata/seeddb.bin. Mii data and system saves live under nand/, which the core creates itself.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.42))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                    requirements
+                    SettingsCard("File") {
+                        infoRow("Name", game.url.lastPathComponent)
+                        infoRow("Core", library.coreDescription)
+                        infoRow("Core check", library.coreStatus)
+                    }
 
                     Button(action: {
                         library.remove(game)
@@ -222,10 +271,12 @@ struct GameDetailView: View {
                         Text("Remove from library")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.red.opacity(0.9))
-                            .padding(.top, 10)
+                            .padding(.vertical, 6)
                     }
-                    .padding(.bottom, 32)
+                    .padding(.bottom, 30)
                 }
+                .padding(.horizontal, 26)
+                .padding(.top, 26)
             }
         }
         .fullScreenCover(item: $session) { session in
@@ -233,117 +284,93 @@ struct GameDetailView: View {
         }
     }
 
-    private var resolutionPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Resolution scale")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.45))
-                Spacer()
-                Text("\(resolutionScale)x · applied when playback starts")
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.45))
+    private var hero: some View {
+        VStack(spacing: 10) {
+            if let icon = game.icon {
+                Image(uiImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 116, height: 116)
+                    .cornerRadius(24)
+                    .shadow(color: .black.opacity(0.4), radius: 18, y: 8)
             }
-            HStack(spacing: 8) {
-                ForEach(1...4, id: \.self) { scale in
-                    Button(action: { resolutionScale = scale }) {
-                        Text("\(scale)x")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(resolutionScale == scale ? .black : .white.opacity(0.8))
-                            .frame(width: 54, height: 30)
-                            .background(
-                                Capsule().fill(resolutionScale == scale
-                                               ? Color.white.opacity(0.85)
-                                               : Color.white.opacity(0.12))
-                            )
-                    }
-                }
-                Spacer()
-            }
+            Text(game.title)
+                .font(.system(size: 24, weight: .bold))
+                .multilineTextAlignment(.center)
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+            Text(game.subtitle)
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.5))
         }
-        .padding(.horizontal, 28)
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 4)
     }
 
-    private var layoutPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Screen layout")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.45))
-                Spacer()
-                Text("applied when playback starts")
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.45))
-            }
+    private var playButton: some View {
+        Button(action: {
+            session = PlaybackSession(game: game,
+                                      coreDirectory: library.coreDirectory,
+                                      settings: effective)
+        }) {
             HStack(spacing: 8) {
-                ForEach(PlaybackLayout.allCases) { option in
-                    Button(action: { layout = option }) {
-                        Text(option.title)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(layout == option ? .black : .white.opacity(0.8))
-                            .padding(.horizontal, 16)
-                            .frame(height: 30)
-                            .background(
-                                Capsule().fill(layout == option
-                                               ? Color.white.opacity(0.85)
-                                               : Color.white.opacity(0.12))
-                            )
-                    }
-                }
-                Spacer()
+                Image(systemName: "play.fill")
+                Text("Play")
             }
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundColor(.black)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(Capsule().fill(Color.white.opacity(0.92)))
         }
-        .padding(.horizontal, 28)
+        .buttonStyle(PlainButtonStyle())
     }
 
-    private var requirements: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Beyond the ROM")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.45))
-                Spacer()
-            }
-
-            ForEach(library.coreFileStatus()) { status in
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: status.present ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 12))
-                        .foregroundColor(status.present ? Color.green.opacity(0.8) : Color.white.opacity(0.3))
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(status.id)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.85))
-                        Text(status.note)
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.45))
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-
-            Text("Azahar keeps its own user directory under Documents/Azahar. A decrypted dump boots with nothing else in it. Encrypted content needs sysdata/aes_keys.txt and, for seeded titles, sysdata/seeddb.bin; Mii data and system saves live under nand/, which the core creates itself. Whether this file is encrypted is decided by the core when it loads it: an encrypted dump is refused with \"This ROM is encrypted and must be decrypted before use with Azahar.\", and any missing archive is named on the playback screen.")
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.45))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 28)
-        .padding(.top, 6)
+    private func update(_ body: (inout SettingsStore.GameOverride) -> Void) {
+        var override = gameOverride
+        body(&override)
+        store.setOverride(override, for: game.id)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top) {
             Text(label)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.45))
-                .frame(width: 84, alignment: .leading)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white.opacity(0.42))
+                .frame(width: 76, alignment: .leading)
             Text(value)
-                .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.85))
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.8))
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 28)
+    }
+}
+
+struct MenuChip<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundColor(.white.opacity(0.85))
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .background(Capsule().fill(Color.white.opacity(0.1)))
+        }
     }
 }
 

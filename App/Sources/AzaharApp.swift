@@ -6,12 +6,16 @@ struct AzaharApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LibraryView()
+            RootView()
                 .environmentObject(library)
                 .preferredColorScheme(.dark)
                 .onAppear {
+                    // So an exception that does get past a guard leaves its name and
+                    // reason in the log instead of only in a crash report.
+                    AZInstallExceptionHandler()
                     library.reload()
                     library.runCoreCheck()
+                    AudioOutput.shared.prepare()
                 }
         }
     }
