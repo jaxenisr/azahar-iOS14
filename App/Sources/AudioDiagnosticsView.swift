@@ -25,6 +25,7 @@ struct AudioDiagnosticsView: View {
     @State private var callbacksTotal: UInt64 = 0
     @State private var baseline: Baseline?
     @State private var touch = TouchCounters()
+    @State private var health = AudioHealth.Feedback()
 
     private struct SessionInfo {
         var category = "—"
@@ -82,6 +83,7 @@ struct AudioDiagnosticsView: View {
                         row("Engine", counters.engineRunning ? "running" : "stopped",
                             tint: counters.engineRunning ? Design.Palette.positive : .orange)
                         row("Buffer", "\(counters.bufferedFrames) frames · \(String(format: "%.0f", counters.latencyMilliseconds)) ms")
+                        row("Target", targetText, tint: targetTint)
                         row("Produced", "\(counters.produced) frames total")
                         row("Consumed", "\(counters.consumed) frames total")
                         row("Volume", String(format: "%.0f%% · %@",
@@ -94,10 +96,16 @@ struct AudioDiagnosticsView: View {
                             tint: rates.callbacks > 0 ? Design.Palette.ink : .orange)
                         row("Produced/s", String(format: "%.0f frames", rates.produced))
                         row("Consumed/s", String(format: "%.0f frames", rates.consumed))
+                        row("Batch", String(format: "%.0f frames", health.batchFrames))
                         row("Underruns", "\(counters.underruns)",
                             tint: counters.underruns > 0 ? .orange : Design.Palette.ink)
+                        row("Under/min", "\(health.underrunsLastMinute)",
+                            tint: health.underrunsLastMinute > 0 ? .orange : Design.Palette.ink)
                         row("Dropped", "\(counters.dropped)",
                             tint: counters.dropped > 0 ? .orange : Design.Palette.ink)
+                        row("Drop/min", "\(health.droppedLastMinute)",
+                            tint: health.droppedLastMinute > 0 ? .orange : Design.Palette.ink)
+                        hint(health.verdict)
                     }
 
                     SettingsCard("Touch") {
@@ -114,7 +122,8 @@ struct AudioDiagnosticsView: View {
                         hint("Callbacks at 0/s means the core is not asking us for audio at all — nothing below that point can be the problem.")
                         hint("Produced/s should sit near the core rate. If it is near zero while callbacks are healthy, the core is sending silence.")
                         hint("Consumed/s should roughly match produced/s. Consumed near zero with audio playing means the render thread is not being pulled.")
-                        hint("Underruns climbing means the buffer is too small for the emulator's timing; drops mean it is being outrun.")
+                        hint("Underruns and drops are counted twice: since the game loaded, and in the last minute. The second number is the one that describes now.")
+                        hint("Target is two batches of audio at the measured rate. Underruns with a buffer below it mean the buffer is too small; underruns above it mean the emulation thread paused.")
                         hint("A refused graph is listed above with the exception name, and written to Documents/Azahar/log/frontend-crash.log.")
                     }
                 }
@@ -128,6 +137,21 @@ struct AudioDiagnosticsView: View {
     }
 
     // MARK: - Pieces
+
+    /// The buffer the measured rate asks for, next to the one in use.
+    private var targetText: String {
+        guard health.recommendedBufferMilliseconds > 0 else { return "measuring" }
+        return String(format: "%.0f ms wanted · %.0f ms held",
+                      health.recommendedBufferMilliseconds,
+                      counters.latencyMilliseconds)
+    }
+
+    private var targetTint: Color {
+        guard health.recommendedBufferMilliseconds > 0 else { return Design.Palette.ink }
+        return counters.latencyMilliseconds + 1 >= health.recommendedBufferMilliseconds
+            ? Design.Palette.positive
+            : .orange
+    }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -233,5 +257,9 @@ struct AudioDiagnosticsView: View {
                             produced: snapshot.produced,
                             consumed: snapshot.consumed,
                             time: now)
+
+        health = AudioHealth.shared.record(counters: snapshot,
+                                           callbacks: callbacksTotal,
+                                           now: now)
     }
 }
