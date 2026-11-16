@@ -185,7 +185,9 @@ final class SettingsStore: ObservableObject {
         if !defaults.bool(forKey: layoutMigrationKey) {
             defaults.set(true, forKey: layoutMigrationKey)
             if global.emulation.layout == .largeScreen {
-                global.emulation.layout = .stacked
+                // Old default, never chosen by hand in that case: back to "not
+                // chosen", which plays stacked and reads Default.
+                global.emulation.layout = nil
                 save()
             }
         }
