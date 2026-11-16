@@ -19,9 +19,18 @@ final class SettingsStore: ObservableObject {
         var layout: PlaybackLayout?
         var speed: PlaybackSpeed?
         var cpuClockPercent: Int?
+        /// The experimental control layout, per title: a preset and the nudges
+        /// that go with it. Keyed by `ControlSlot.rawValue`.
+        var controlPreset: ControlPreset?
+        var controlOffsets: [String: ControlOffset]?
 
         var isEmpty: Bool {
-            resolutionScale == nil && layout == nil && speed == nil && cpuClockPercent == nil
+            resolutionScale == nil
+                && layout == nil
+                && speed == nil
+                && cpuClockPercent == nil
+                && controlPreset == nil
+                && (controlOffsets?.isEmpty ?? true)
         }
     }
 
@@ -64,6 +73,7 @@ final class SettingsStore: ObservableObject {
         if let value = game.layout { result.layout = value }
         if let value = game.speed { result.speed = value }
         if let value = game.cpuClockPercent { result.cpuClockPercent = value }
+        if let value = game.controlPreset { result.controlPreset = value }
         return result
     }
 
@@ -73,6 +83,11 @@ final class SettingsStore: ObservableObject {
 
     func hasOverride(for gameID: String) -> Bool {
         !(overrides[gameID]?.isEmpty ?? true)
+    }
+
+    /// The nudges this title uses, already filtered to the ones that moved.
+    func controlOffsets(for gameID: String) -> [String: ControlOffset] {
+        (overrides[gameID]?.controlOffsets ?? [:]).filter { !$0.value.isZero }
     }
 
     // MARK: - Writing

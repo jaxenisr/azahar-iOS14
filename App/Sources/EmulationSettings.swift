@@ -85,6 +85,11 @@ struct EmulationSettings: Codable, Equatable {
     var controlsOpacity: Double = 0.9
     var controlsScale: Double = 1.0
 
+    /// The experimental control layout. Off by default: the standard layout stays
+    /// the one a fresh install gets, and turning this on is a deliberate act.
+    var customControlsEnabled: Bool = false
+    var controlPreset: ControlPreset = .classic
+
     static let cpuClockChoices = [25, 50, 75, 100, 125, 150, 175, 200]
 
     var clampedResolution: Int { min(max(resolutionScale, 1), 4) }
