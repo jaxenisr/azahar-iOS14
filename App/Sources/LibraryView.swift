@@ -486,6 +486,11 @@ struct GameDetailView: View {
 
     /// The artwork the cover handed over, drawn at the pane's size under the same
     /// geometry id, so it grows rather than arriving twice.
+    ///
+    /// The text keeps a wide margin on both sides: the close button lives in this
+    /// corner, and a long title without that room runs underneath it and becomes
+    /// unreadable exactly where the two overlap. The margin is the button plus its
+    /// padding, measured once here rather than guessed per title.
     private var hero: some View {
         VStack(spacing: Design.Space.s) {
             Group {
@@ -504,14 +509,19 @@ struct GameDetailView: View {
                 .font(.system(size: 24, weight: .bold))
                 .multilineTextAlignment(.center)
                 .foregroundColor(Design.Palette.ink)
-                .padding(.horizontal, Design.Space.s)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, GameDetailView.titleInset)
             Text(game.subtitle)
                 .font(Design.Fonts.caption)
                 .foregroundColor(Design.Palette.secondaryInk)
+                .padding(.horizontal, GameDetailView.titleInset)
         }
         .frame(maxWidth: .infinity)
         .entrance(0)
     }
+
+    /// A 44 pt close button with its 12 pt padding, plus a little air.
+    private static let titleInset: CGFloat = 64
 
     private var playButton: some View {
         Button(action: {
