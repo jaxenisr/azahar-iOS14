@@ -121,13 +121,19 @@ struct EmulationSettings: Codable, Equatable {
     var controlsOpacity: Double = 0.9
     var controlsScale: Double = 1.0
 
+    /// The experimental control layout. Off by default: the standard layout stays
+    /// the one a fresh install gets, and turning this on is a deliberate act.
+    var customControlsEnabled: Bool = false
+    var controlPreset: ControlPreset = .classic
+
     static let cpuClockChoices = [25, 50, 75, 100, 125, 150, 175, 200]
 
     init() {}
 
     /// Every field is optional on disk so that a value stored by an earlier build
-    /// keeps its other settings when a field is added. Synthesised decoding throws
-    /// on the missing key, and the load would silently fall back to defaults.
+    /// keeps its other settings when a field is added — this setting was added to
+    /// a file already on people's devices. Synthesised decoding throws on the
+    /// missing key, and the load would silently fall back to defaults.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         resolutionScale = try container.decodeIfPresent(Int.self, forKey: .resolutionScale) ?? 1
@@ -140,11 +146,14 @@ struct EmulationSettings: Codable, Equatable {
         hapticsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
         controlsOpacity = try container.decodeIfPresent(Double.self, forKey: .controlsOpacity) ?? 0.9
         controlsScale = try container.decodeIfPresent(Double.self, forKey: .controlsScale) ?? 1.0
+        customControlsEnabled = try container.decodeIfPresent(Bool.self, forKey: .customControlsEnabled) ?? false
+        controlPreset = try container.decodeIfPresent(ControlPreset.self, forKey: .controlPreset) ?? .classic
     }
 
     private enum CodingKeys: String, CodingKey {
         case resolutionScale, layout, speed, cpuClockPercent, region
         case volume, isMuted, hapticsEnabled, controlsOpacity, controlsScale
+        case customControlsEnabled, controlPreset
     }
 
     var clampedResolution: Int { min(max(resolutionScale, 1), 4) }
