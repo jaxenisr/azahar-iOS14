@@ -381,7 +381,8 @@ struct GameDetailView: View {
                     column {
                         SettingsCard("This title") {
                             SettingRow("Resolution scale", subtitle: overrideNote(gameOverride.resolutionScale == nil)) {
-                                MenuChip(title: gameOverride.resolutionScale.map { "\($0)x" } ?? "Global") {
+                                MenuChip(title: inheriting(gameOverride.resolutionScale.map { "\($0)x" },
+                                                           "\(effective.clampedResolution)x")) {
                                     Button("Use global") { update { $0.resolutionScale = nil } }
                                     ForEach(1...4, id: \.self) { scale in
                                         Button("\(scale)x") { update { $0.resolutionScale = scale } }
@@ -390,7 +391,7 @@ struct GameDetailView: View {
                             }
                             RowDivider()
                             SettingRow("Screen layout", subtitle: overrideNote(gameOverride.layout == nil)) {
-                                MenuChip(title: gameOverride.layout?.title ?? "Global") {
+                                MenuChip(title: inheriting(gameOverride.layout?.title, effective.layout.title)) {
                                     Button("Use global") { update { $0.layout = nil } }
                                     ForEach(PlaybackLayout.allCases) { layout in
                                         Button(layout.title) { update { $0.layout = layout } }
@@ -399,7 +400,7 @@ struct GameDetailView: View {
                             }
                             RowDivider()
                             SettingRow("Emulation speed", subtitle: overrideNote(gameOverride.speed == nil)) {
-                                MenuChip(title: gameOverride.speed?.title ?? "Global") {
+                                MenuChip(title: inheriting(gameOverride.speed?.title, effective.speed.title)) {
                                     Button("Use global") { update { $0.speed = nil } }
                                     ForEach(PlaybackSpeed.allCases) { speed in
                                         Button(speed.title) { update { $0.speed = speed } }
@@ -408,7 +409,8 @@ struct GameDetailView: View {
                             }
                             RowDivider()
                             SettingRow("3DS CPU clock", subtitle: overrideNote(gameOverride.cpuClockPercent == nil)) {
-                                MenuChip(title: gameOverride.cpuClockPercent.map { "\($0)%" } ?? "Global") {
+                                MenuChip(title: inheriting(gameOverride.cpuClockPercent.map { "\($0)%" },
+                                                           "\(effective.clampedClock)%")) {
                                     Button("Use global") { update { $0.cpuClockPercent = nil } }
                                     ForEach(EmulationSettings.cpuClockChoices, id: \.self) { percent in
                                         Button("\(percent)%") { update { $0.cpuClockPercent = percent } }
@@ -417,7 +419,7 @@ struct GameDetailView: View {
                             }
                             RowDivider()
                             SettingRow("Region", subtitle: overrideNote(gameOverride.region == nil)) {
-                                MenuChip(title: gameOverride.region?.title ?? "Global") {
+                                MenuChip(title: inheriting(gameOverride.region?.title, effective.region.title)) {
                                     Button("Use global") { update { $0.region = nil } }
                                     ForEach(PlaybackRegion.allCases) { region in
                                         Button(region.title) { update { $0.region = region } }
@@ -558,6 +560,14 @@ struct GameDetailView: View {
         isGlobal ? "Following the global value" : "Overridden for this title"
     }
 
+    /// What a menu row shows on the title page: the override when this title has
+    /// one, and otherwise the value it inherits from the global setting, spelled
+    /// out. A bare number cannot tell you whether it was chosen here or above.
+    private func inheriting(_ override: String?, _ global: String) -> String {
+        guard let override = override else { return "Global · \(global)" }
+        return override
+    }
+
     /// The same column the settings screens use: 720 pt cap, 20 pt margins.
     private func column<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
@@ -617,6 +627,7 @@ struct MenuChip<Content: View>: View {
             HStack(spacing: Design.Space.xxs) {
                 Text(title)
                     .font(Design.Fonts.caption.weight(.semibold))
+                    .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9, weight: .bold))
             }
