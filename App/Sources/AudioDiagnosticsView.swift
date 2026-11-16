@@ -177,7 +177,7 @@ struct AudioDiagnosticsView: View {
         HStack(alignment: .top, spacing: 12) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(Design.Palette.tertiaryInk)
+                .foregroundColor(Design.Palette.secondaryInk)
                 .frame(width: 104, alignment: .leading)
             Text(value)
                 .font(Theme.monospacedSmall)
