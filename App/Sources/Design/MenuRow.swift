@@ -1,13 +1,22 @@
 import SwiftUI
 
 /// A setting with more choices than a row can hold: the value on the right, a
-/// chevron, and the whole row opens the choices.
+/// chevron, and the value opens the choices.
 ///
-/// The panel is SwiftUI's own `Menu` around a `Picker`, not one of ours. With the
-/// app declaring a light appearance, the system panel arrives light, right
-/// beside the row, with the checkmark, the selection haptic and the anchoring
-/// behaviour coming from the system rather than from code here that has to be
-/// kept in step with it. It is also the panel VoiceOver already knows.
+/// The panel is SwiftUI's own `Menu`, so its material, its checkmark, the
+/// selection haptic and the presentation are the system's.
+///
+/// Where it appears is not ours to choose: on iOS 14 a `UIMenu` is placed
+/// relative to the centre of the view it is attached to, and there is no anchor
+/// API. Attached to the whole row, the panel opened in the middle of the card
+/// over the rows below; attached to the value, it opens where the value is,
+/// which is where this design wants it. The trade is deliberate and is the one
+/// Apple's menu cannot avoid: the value column is the target, not the row's
+/// title.
+///
+/// The target is still a comfortable one — the full 44 pt row height and at
+/// least 100 pt wide, ending at the chevron, with a rectangle hit shape — so it
+/// reads as the value and is easy to hit.
 ///
 /// `selection` is nil when nothing was ever chosen. The row then reads
 /// `defaultTitle` and the picker ticks that same line, so "never chosen" is a
@@ -52,19 +61,19 @@ struct MenuSettingRow<Value: Hashable>: View {
     }
 
     var body: some View {
-        Menu {
-            // The untouched state is the first line and carries the tick when
-            // nothing was chosen, so the panel always shows what is in force.
-            Picker(title,
-                   selection: Binding(get: { selection },
-                                      set: { onSelect($0) })) {
-                Text(defaultTitle).tag(Optional<Value>.none)
-                ForEach(options, id: \.value) { option in
-                    Text(option.title).tag(Optional(option.value))
+        DesignRow(title, subtitle: subtitle) {
+            Menu {
+                // The untouched state is the first line and carries the tick when
+                // nothing was chosen, so the panel always shows what is in force.
+                Picker(title,
+                       selection: Binding(get: { selection },
+                                          set: { onSelect($0) })) {
+                    Text(defaultTitle).tag(Optional<Value>.none)
+                    ForEach(options, id: \.value) { option in
+                        Text(option.title).tag(Optional(option.value))
+                    }
                 }
-            }
-        } label: {
-            DesignRow(title, subtitle: subtitle) {
+            } label: {
                 HStack(spacing: Design.Space.xxs) {
                     Text(currentTitle)
                         .font(Design.Fonts.caption.weight(.semibold))
@@ -74,16 +83,17 @@ struct MenuSettingRow<Value: Hashable>: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(Design.Palette.secondaryInk)
                 }
+                // This frame is what the panel hangs from, and what the finger
+                // has to hit: the whole row's height, at least 100 pt wide, ending
+                // at the chevron.
+                .frame(minWidth: 100, minHeight: 44, alignment: .trailing)
+                .contentShape(Rectangle())
             }
-            // A row with a subtitle is taller than this on its own; a short one
-            // would not be, and every row in this app is at least 44 pt.
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityValue(currentTitle)
+            .accessibilityHint("Opens the choices")
+            .accessibilityAddTraits(.isButton)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(currentTitle)
-        .accessibilityHint("Opens the choices")
-        .accessibilityAddTraits(.isButton)
     }
 }
