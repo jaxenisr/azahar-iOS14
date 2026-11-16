@@ -415,6 +415,15 @@ struct GameDetailView: View {
                                     }
                                 }
                             }
+                            RowDivider()
+                            SettingRow("Region", subtitle: overrideNote(gameOverride.region == nil)) {
+                                MenuChip(title: gameOverride.region?.title ?? "Global") {
+                                    Button("Use global") { update { $0.region = nil } }
+                                    ForEach(PlaybackRegion.allCases) { region in
+                                        Button(region.title) { update { $0.region = region } }
+                                    }
+                                }
+                            }
 
                             if store.hasOverride(for: game.id) {
                                 Button(action: { store.clearOverride(for: game.id) }) {
@@ -581,6 +590,7 @@ struct GameDetailView: View {
         library.remove(game)
         close()
     }
+
 
     private func close() {
         if let onClose = onClose {
