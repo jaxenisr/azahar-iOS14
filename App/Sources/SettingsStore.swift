@@ -19,9 +19,11 @@ final class SettingsStore: ObservableObject {
         var layout: PlaybackLayout?
         var speed: PlaybackSpeed?
         var cpuClockPercent: Int?
+        var region: PlaybackRegion?
 
         var isEmpty: Bool {
-            resolutionScale == nil && layout == nil && speed == nil && cpuClockPercent == nil
+            resolutionScale == nil && layout == nil && speed == nil
+                && cpuClockPercent == nil && region == nil
         }
     }
 
@@ -64,6 +66,7 @@ final class SettingsStore: ObservableObject {
         if let value = game.layout { result.layout = value }
         if let value = game.speed { result.speed = value }
         if let value = game.cpuClockPercent { result.cpuClockPercent = value }
+        if let value = game.region { result.region = value }
         return result
     }
 
