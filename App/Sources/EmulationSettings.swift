@@ -72,6 +72,39 @@ enum PlaybackSpeed: Double, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Which market the emulated console reports itself as.
+///
+/// Region locking is the console's own, not the emulator's: a title that checks it
+/// refuses to boot when the two disagree. These strings are exactly the values the
+/// core accepts for `citra_region_value`, and `Auto` is the core's default, which
+/// picks the region from the title's own header. So the default here changes
+/// nothing for a title that was already playing.
+enum PlaybackRegion: String, Codable, CaseIterable, Identifiable {
+    case automatic = "Auto"
+    case japan = "Japan"
+    case usa = "USA"
+    case europe = "Europe"
+    case australia = "Australia"
+    case china = "China"
+    case korea = "Korea"
+    case taiwan = "Taiwan"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .japan: return "Japan"
+        case .usa: return "USA"
+        case .europe: return "Europe"
+        case .australia: return "Australia"
+        case .china: return "China"
+        case .korea: return "Korea"
+        case .taiwan: return "Taiwan"
+        }
+    }
+}
+
 /// One playback's settings: global defaults with any per-game overrides already
 /// applied.
 struct EmulationSettings: Codable, Equatable {
@@ -79,6 +112,9 @@ struct EmulationSettings: Codable, Equatable {
     var layout: PlaybackLayout = .stacked
     var speed: PlaybackSpeed = .normal
     var cpuClockPercent: Int = 100
+    /// Read at boot by the core; `Automatic` is what every title used before this
+    /// setting existed.
+    var region: PlaybackRegion = .automatic
     var volume: Double = 0.8
     var isMuted: Bool = false
     var hapticsEnabled: Bool = true
@@ -86,6 +122,30 @@ struct EmulationSettings: Codable, Equatable {
     var controlsScale: Double = 1.0
 
     static let cpuClockChoices = [25, 50, 75, 100, 125, 150, 175, 200]
+
+    init() {}
+
+    /// Every field is optional on disk so that a value stored by an earlier build
+    /// keeps its other settings when a field is added. Synthesised decoding throws
+    /// on the missing key, and the load would silently fall back to defaults.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        resolutionScale = try container.decodeIfPresent(Int.self, forKey: .resolutionScale) ?? 1
+        layout = try container.decodeIfPresent(PlaybackLayout.self, forKey: .layout) ?? .stacked
+        speed = try container.decodeIfPresent(PlaybackSpeed.self, forKey: .speed) ?? .normal
+        cpuClockPercent = try container.decodeIfPresent(Int.self, forKey: .cpuClockPercent) ?? 100
+        region = try container.decodeIfPresent(PlaybackRegion.self, forKey: .region) ?? .automatic
+        volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0.8
+        isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
+        hapticsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
+        controlsOpacity = try container.decodeIfPresent(Double.self, forKey: .controlsOpacity) ?? 0.9
+        controlsScale = try container.decodeIfPresent(Double.self, forKey: .controlsScale) ?? 1.0
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case resolutionScale, layout, speed, cpuClockPercent, region
+        case volume, isMuted, hapticsEnabled, controlsOpacity, controlsScale
+    }
 
     var clampedResolution: Int { min(max(resolutionScale, 1), 4) }
     var clampedClock: Int {
