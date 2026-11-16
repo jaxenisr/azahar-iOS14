@@ -67,9 +67,9 @@ final class PlaybackSession: ObservableObject, Identifiable {
     @Published private(set) var saveStateMessage: String?
     @Published private(set) var isLoaded = false
 
-    var resolutionScale: Int { settings.clampedResolution }
-    var layout: PlaybackLayout { settings.layout }
-    var speedLimitTitle: String { settings.speed.title }
+    var resolutionScale: Int { settings.effectiveResolutionScale }
+    var layout: PlaybackLayout { settings.effectiveLayout }
+    var speedLimitTitle: String { settings.effectiveSpeed.title }
 
    /// Directory holding this title's one save-state slot.
     var stateDirectory: URL {
@@ -109,8 +109,8 @@ final class PlaybackSession: ObservableObject, Identifiable {
                      resolutionScale: Int = 1,
                      layout: PlaybackLayout = .largeScreen) {
         var settings = EmulationSettings()
-        settings.resolutionScale = resolutionScale
-        settings.layout = layout
+        settings.resolutionScale = resolutionScale == EmulationSettings.Default.resolutionScale ? nil : resolutionScale
+        settings.layout = layout == EmulationSettings.Default.layout ? nil : layout
         self.init(game: game, coreDirectory: coreDirectory, settings: settings)
     }
 
@@ -268,17 +268,17 @@ final class PlaybackSession: ObservableObject, Identifiable {
         AZCoreSetRendererPreference(true)
         AZCoreSetOption("citra_graphics_api", "Vulkan")
         AZCoreSetOption("graphics_api", "Vulkan")
-        AZCoreSetOption("citra_resolution_factor", "\(settings.clampedResolution)")
-        AZCoreSetOption("resolution_factor", "\(settings.clampedResolution)")
-        AZCoreSetOption("citra_layout_option", settings.layout.rawValue)
-        AZCoreSetOption("layout_option", settings.layout.rawValue)
-        AZCoreSetOption("citra_cpu_clock_percentage", "\(settings.clampedClock)")
+        AZCoreSetOption("citra_resolution_factor", "\(settings.effectiveResolutionScale)")
+        AZCoreSetOption("resolution_factor", "\(settings.effectiveResolutionScale)")
+        AZCoreSetOption("citra_layout_option", settings.effectiveLayout.rawValue)
+        AZCoreSetOption("layout_option", settings.effectiveLayout.rawValue)
+        AZCoreSetOption("citra_cpu_clock_percentage", "\(settings.effectiveClock)")
         // Region is read once, when the console is set up: it is what the emulated
         // machine reports about itself, so a title that region-locks has to be
         // restarted after the setting changes. Only the prefixed name is given
         // here because the core's own value is an integer while this option takes
         // a region name, and the alias would be read as the wrong type.
-        AZCoreSetOption("citra_region_value", settings.region.rawValue)
+        AZCoreSetOption("citra_region_value", settings.effectiveRegion.rawValue)
         // The core reads touch from the pointer device; there is no mouse here.
         AZCoreSetOption("citra_enable_touch_touchscreen", "enabled")
         AZCoreSetOption("citra_enable_mouse_touchscreen", "disabled")
@@ -351,7 +351,7 @@ final class PlaybackSession: ObservableObject, Identifiable {
             // Pacing. Deadlines accumulate from the previous deadline rather than
             // from this frame's end, so a sleep that overshoots is paid back by a
             // shorter next sleep instead of dragging the rate down permanently.
-            if let multiplier = settings.speed.pacingMultiplier {
+            if let multiplier = settings.effectiveSpeed.pacingMultiplier {
                 let interval = targetInterval / multiplier
                 nextDeadline += interval
                 if nextDeadline < frameEnd {
