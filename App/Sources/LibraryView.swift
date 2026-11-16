@@ -380,51 +380,49 @@ struct GameDetailView: View {
 
                     column {
                         SettingsCard("This title") {
-                            SettingRow("Resolution scale", subtitle: overrideNote(gameOverride.resolutionScale == nil)) {
-                                MenuChip(title: inheriting(gameOverride.resolutionScale.map { "\($0)x" },
-                                                           "\(effective.clampedResolution)x")) {
-                                    Button("Use global") { update { $0.resolutionScale = nil } }
-                                    ForEach(1...4, id: \.self) { scale in
-                                        Button("\(scale)x") { update { $0.resolutionScale = scale } }
-                                    }
-                                }
+                            MenuSettingRow(title: "Resolution scale",
+                                           subtitle: overrideNote(gameOverride.resolutionScale == nil),
+                                           options: (1...4).map {
+                                               MenuSettingRow<Int>.Option(title: "\($0)x", value: $0)
+                                           },
+                                           selection: gameOverride.resolutionScale) { value in
+                                update { $0.resolutionScale = value }
                             }
                             RowDivider()
-                            SettingRow("Screen layout", subtitle: overrideNote(gameOverride.layout == nil)) {
-                                MenuChip(title: inheriting(gameOverride.layout?.title, effective.layout.title)) {
-                                    Button("Use global") { update { $0.layout = nil } }
-                                    ForEach(PlaybackLayout.allCases) { layout in
-                                        Button(layout.title) { update { $0.layout = layout } }
-                                    }
-                                }
+                            MenuSettingRow(title: "Screen layout",
+                                           subtitle: overrideNote(gameOverride.layout == nil),
+                                           options: PlaybackLayout.allCases.map {
+                                               MenuSettingRow<PlaybackLayout>.Option(title: $0.title, value: $0)
+                                           },
+                                           selection: gameOverride.layout) { value in
+                                update { $0.layout = value }
                             }
                             RowDivider()
-                            SettingRow("Emulation speed", subtitle: overrideNote(gameOverride.speed == nil)) {
-                                MenuChip(title: inheriting(gameOverride.speed?.title, effective.speed.title)) {
-                                    Button("Use global") { update { $0.speed = nil } }
-                                    ForEach(PlaybackSpeed.allCases) { speed in
-                                        Button(speed.title) { update { $0.speed = speed } }
-                                    }
-                                }
+                            MenuSettingRow(title: "Emulation speed",
+                                           subtitle: overrideNote(gameOverride.speed == nil),
+                                           options: PlaybackSpeed.allCases.map {
+                                               MenuSettingRow<PlaybackSpeed>.Option(title: $0.title, value: $0)
+                                           },
+                                           selection: gameOverride.speed) { value in
+                                update { $0.speed = value }
                             }
                             RowDivider()
-                            SettingRow("3DS CPU clock", subtitle: overrideNote(gameOverride.cpuClockPercent == nil)) {
-                                MenuChip(title: inheriting(gameOverride.cpuClockPercent.map { "\($0)%" },
-                                                           "\(effective.clampedClock)%")) {
-                                    Button("Use global") { update { $0.cpuClockPercent = nil } }
-                                    ForEach(EmulationSettings.cpuClockChoices, id: \.self) { percent in
-                                        Button("\(percent)%") { update { $0.cpuClockPercent = percent } }
-                                    }
-                                }
+                            MenuSettingRow(title: "3DS CPU clock",
+                                           subtitle: overrideNote(gameOverride.cpuClockPercent == nil),
+                                           options: EmulationSettings.cpuClockChoices.map {
+                                               MenuSettingRow<Int>.Option(title: "\($0)%", value: $0)
+                                           },
+                                           selection: gameOverride.cpuClockPercent) { value in
+                                update { $0.cpuClockPercent = value }
                             }
                             RowDivider()
-                            SettingRow("Region", subtitle: overrideNote(gameOverride.region == nil)) {
-                                MenuChip(title: inheriting(gameOverride.region?.title, effective.region.title)) {
-                                    Button("Use global") { update { $0.region = nil } }
-                                    ForEach(PlaybackRegion.allCases) { region in
-                                        Button(region.title) { update { $0.region = region } }
-                                    }
-                                }
+                            MenuSettingRow(title: "Region",
+                                           subtitle: overrideNote(gameOverride.region == nil),
+                                           options: PlaybackRegion.allCases.map {
+                                               MenuSettingRow<PlaybackRegion>.Option(title: $0.title, value: $0)
+                                           },
+                                           selection: gameOverride.region) { value in
+                                update { $0.region = value }
                             }
 
                             if store.hasOverride(for: game.id) {
@@ -556,16 +554,12 @@ struct GameDetailView: View {
         .padding(.horizontal, Design.Space.sideMargin)
     }
 
-    private func overrideNote(_ isGlobal: Bool) -> String {
-        isGlobal ? "Following the global value" : "Overridden for this title"
-    }
-
-    /// What a menu row shows on the title page: the override when this title has
-    /// one, and otherwise the value it inherits from the global setting, spelled
-    /// out. A bare number cannot tell you whether it was chosen here or above.
-    private func inheriting(_ override: String?, _ global: String) -> String {
-        guard let override = override else { return "Global · \(global)" }
-        return override
+    /// What a menu row says on a title page when this title has not overridden it.
+    /// The value column reads `Default` — one word for one idea, and the menu
+    /// offers the same word as its first line, which is what puts the setting back
+    /// to inheriting — so this line says only where that default comes from.
+    private func overrideNote(_ isInherited: Bool) -> String {
+        isInherited ? "Following the global value" : "Overridden for this title"
     }
 
     /// The same column the settings screens use: 720 pt cap, 20 pt margins.
@@ -607,36 +601,6 @@ struct GameDetailView: View {
             onClose()
         } else {
             presentationMode.wrappedValue.dismiss()
-        }
-    }
-}
-
-struct MenuChip<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        Menu {
-            content
-        } label: {
-            HStack(spacing: Design.Space.xxs) {
-                Text(title)
-                    .font(Design.Fonts.caption.weight(.semibold))
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-            }
-            .foregroundColor(Design.Palette.ink)
-            .padding(.horizontal, Design.Space.s)
-            .frame(height: 32)
-            .background(Capsule().fill(Design.Palette.card))
-            .overlay(Capsule().stroke(Design.Palette.hairline, lineWidth: 1))
-            .contentShape(Capsule())
         }
     }
 }
