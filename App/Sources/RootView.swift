@@ -351,12 +351,13 @@ struct EmulationView: View {
                                 }
                             }
                             RowDivider()
-                            SettingRow("3DS CPU clock",
-                                       subtitle: "How fast the emulated CPU runs. A separate setting: higher does not make playback faster, it makes the emulated machine faster") {
-                                SegmentedRow(options: EmulationSettings.cpuClockChoices.map { "\($0)%" },
-                                             selection: EmulationSettings.cpuClockChoices.firstIndex(of: settings.clampedClock) ?? 3) { index in
-                                    store.updateGlobal { $0.cpuClockPercent = EmulationSettings.cpuClockChoices[index] }
-                                }
+                            MenuSettingRow(title: "3DS CPU clock",
+                                           subtitle: "How fast the emulated CPU runs. A separate setting: higher does not make playback faster, it makes the emulated machine faster",
+                                           options: EmulationSettings.cpuClockChoices.map {
+                                               MenuSettingRow<Int>.Option(title: "\($0)%", value: $0)
+                                           },
+                                           selection: settings.clampedClock) { percent in
+                                store.updateGlobal { $0.cpuClockPercent = percent }
                             }
                             RowDivider()
                             PlaceholderRow(feature: .new3DSMode)
