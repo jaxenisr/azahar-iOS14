@@ -108,13 +108,26 @@ enum PlaybackRegion: String, Codable, CaseIterable, Identifiable {
 /// One playback's settings: global defaults with any per-game overrides already
 /// applied.
 struct EmulationSettings: Codable, Equatable {
-    var resolutionScale: Int = 1
-    var layout: PlaybackLayout = .stacked
-    var speed: PlaybackSpeed = .normal
-    var cpuClockPercent: Int = 100
+    /// The value each setting falls back to when nothing was chosen. A stored nil
+    /// means exactly that — not chosen — so the row can read `Default` and the
+    /// menu can tick it, instead of showing the default as though it were a
+    /// choice someone had made.
+    enum Default {
+        static let resolutionScale = 1
+        static let layout: PlaybackLayout = .stacked
+        static let speed: PlaybackSpeed = .normal
+        static let cpuClockPercent = 100
+        static let region: PlaybackRegion = .automatic
+    }
+
+    /// nil: never chosen. The app uses `Default` and says so.
+    var resolutionScale: Int?
+    var layout: PlaybackLayout?
+    var speed: PlaybackSpeed?
+    var cpuClockPercent: Int?
     /// Read at boot by the core; `Automatic` is what every title used before this
     /// setting existed.
-    var region: PlaybackRegion = .automatic
+    var region: PlaybackRegion?
     var volume: Double = 0.8
     var isMuted: Bool = false
     var hapticsEnabled: Bool = true
@@ -131,16 +144,25 @@ struct EmulationSettings: Codable, Equatable {
     init() {}
 
     /// Every field is optional on disk so that a value stored by an earlier build
-    /// keeps its other settings when a field is added — this setting was added to
-    /// a file already on people's devices. Synthesised decoding throws on the
+    /// keeps its other settings when a field is added — these settings live in a
+    /// file already on people's devices. Synthesised decoding throws on the
     /// missing key, and the load would silently fall back to defaults.
+    ///
+    /// A stored value equal to the built-in default is read back as "not chosen":
+    /// earlier builds wrote the default into storage whether or not anyone had
+    /// picked it, and after this change that must not read as a choice.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        resolutionScale = try container.decodeIfPresent(Int.self, forKey: .resolutionScale) ?? 1
-        layout = try container.decodeIfPresent(PlaybackLayout.self, forKey: .layout) ?? .stacked
-        speed = try container.decodeIfPresent(PlaybackSpeed.self, forKey: .speed) ?? .normal
-        cpuClockPercent = try container.decodeIfPresent(Int.self, forKey: .cpuClockPercent) ?? 100
-        region = try container.decodeIfPresent(PlaybackRegion.self, forKey: .region) ?? .automatic
+        resolutionScale = EmulationSettings.chosen(try container.decodeIfPresent(Int.self, forKey: .resolutionScale),
+                                                   Default.resolutionScale)
+        layout = EmulationSettings.chosen(try container.decodeIfPresent(PlaybackLayout.self, forKey: .layout),
+                                          Default.layout)
+        speed = EmulationSettings.chosen(try container.decodeIfPresent(PlaybackSpeed.self, forKey: .speed),
+                                         Default.speed)
+        cpuClockPercent = EmulationSettings.chosen(try container.decodeIfPresent(Int.self, forKey: .cpuClockPercent),
+                                                   Default.cpuClockPercent)
+        region = EmulationSettings.chosen(try container.decodeIfPresent(PlaybackRegion.self, forKey: .region),
+                                          Default.region)
         volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0.8
         isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
         hapticsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
@@ -156,10 +178,33 @@ struct EmulationSettings: Codable, Equatable {
         case customControlsEnabled, controlPreset
     }
 
-    var clampedResolution: Int { min(max(resolutionScale, 1), 4) }
-    var clampedClock: Int {
-        EmulationSettings.cpuClockChoices.contains(cpuClockPercent) ? cpuClockPercent : 100
+    private static func chosen<Value: Equatable>(_ stored: Value?, _ fallback: Value) -> Value? {
+        guard let stored = stored, stored != fallback else { return nil }
+        return stored
     }
+
+    // MARK: - Values to use
+
+    /// What the core is given, and what a title plays with. These are the only
+    /// places the fallback is applied, so "Default" and the value written into a
+    /// core option can never disagree.
+
+    var effectiveResolutionScale: Int {
+        min(max(resolutionScale ?? Default.resolutionScale, 1), 4)
+    }
+
+    var effectiveLayout: PlaybackLayout { layout ?? Default.layout }
+    var effectiveSpeed: PlaybackSpeed { speed ?? Default.speed }
+
+    var effectiveClock: Int {
+        guard let percent = cpuClockPercent, EmulationSettings.cpuClockChoices.contains(percent) else {
+            return Default.cpuClockPercent
+        }
+        return percent
+    }
+
+    var effectiveRegion: PlaybackRegion { region ?? Default.region }
+
     var clampedOpacity: Double { min(max(controlsOpacity, 0.25), 1.0) }
     var clampedScale: Double { min(max(controlsScale, 0.7), 1.35) }
 }
