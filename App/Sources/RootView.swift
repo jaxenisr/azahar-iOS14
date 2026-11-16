@@ -43,6 +43,9 @@ struct RootView: View {
             }
         }
         .background(Design.Palette.background.ignoresSafeArea())
+        // One panel host for the whole app, so a list of choices is drawn above
+        // every card and cannot be clipped by the card it belongs to.
+        .overlay(SelectionMenuOverlay())
     }
 
     @ViewBuilder
@@ -312,6 +315,53 @@ struct EmulationView: View {
 
     private var settings: EmulationSettings { store.global.emulation }
 
+    /// The choices each chip row offers, and the index of the one in force. The
+    /// first chip is always the untouched state, so the row reads Default rather
+    /// than a value nobody picked; the value Default stands for is not listed a
+    /// second time.
+    private static let resolutionChoices = [2, 3, 4]
+    private static let speedChoices: [PlaybackSpeed] = [.half, .threeQuarters, .unlimited]
+
+    private var resolutionChips: [String] {
+        ["Default"] + EmulationView.resolutionChoices.map { "\($0)x" }
+    }
+
+    private var resolutionIndex: Int {
+        guard let scale = settings.resolutionScale,
+              let index = EmulationView.resolutionChoices.firstIndex(of: scale) else { return 0 }
+        return index + 1
+    }
+
+    private var speedChips: [String] {
+        ["Default"] + EmulationView.speedChoices.map { $0.title }
+    }
+
+    private var speedIndex: Int {
+        guard let speed = settings.speed,
+              let index = EmulationView.speedChoices.firstIndex(of: speed) else { return 0 }
+        return index + 1
+    }
+
+    /// The first chip is `Default`: it clears the choice instead of storing the
+    /// value that Default stands for as though it had been picked.
+    private func chooseResolution(_ index: Int) {
+        guard index > 0 else {
+            store.updateGlobal { $0.resolutionScale = nil }
+            return
+        }
+        let scale = EmulationView.resolutionChoices[index - 1]
+        store.updateGlobal { $0.resolutionScale = scale }
+    }
+
+    private func chooseSpeed(_ index: Int) {
+        guard index > 0 else {
+            store.updateGlobal { $0.speed = nil }
+            return
+        }
+        let speed = EmulationView.speedChoices[index - 1]
+        store.updateGlobal { $0.speed = speed }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             CollapsingTitle(title: "Emulation",
@@ -325,17 +375,18 @@ struct EmulationView: View {
                     column {
                         SettingsCard("Graphics", subtitle: "How the 3DS picture is drawn") {
                             SettingRow("Resolution scale", subtitle: "Applied when playback starts") {
-                                SegmentedRow(options: ["1x", "2x", "3x", "4x"],
-                                             selection: settings.clampedResolution - 1) { index in
-                                    store.updateGlobal { $0.resolutionScale = index + 1 }
-                                }
+                                SegmentedRow(options: resolutionChips,
+                                             selection: resolutionIndex,
+                                             onSelect: chooseResolution)
                             }
                             RowDivider()
-                            SettingRow("Screen layout", subtitle: "How the two screens are composed") {
-                                SegmentedRow(options: PlaybackLayout.allCases.map { $0.title },
-                                             selection: PlaybackLayout.allCases.firstIndex(of: settings.layout) ?? 0) { index in
-                                    store.updateGlobal { $0.layout = PlaybackLayout.allCases[index] }
-                                }
+                            MenuSettingRow(title: "Screen layout",
+                                           subtitle: "How the two screens are composed",
+                                           options: PlaybackLayout.allCases
+                                               .filter { $0 != EmulationSettings.Default.layout }
+                                               .map { MenuSettingRow<PlaybackLayout>.Option(title: $0.title, value: $0) },
+                                           selection: settings.layout) { layout in
+                                store.updateGlobal { $0.layout = layout }
                             }
                             RowDivider()
                             PlaceholderRow(feature: .textureFilter)
@@ -345,18 +396,17 @@ struct EmulationView: View {
                         SettingsCard("Performance", subtitle: "How fast the emulated machine runs") {
                             SettingRow("Emulation speed",
                                        subtitle: "How fast playback runs, against real time") {
-                                SegmentedRow(options: PlaybackSpeed.allCases.map { $0.title },
-                                             selection: PlaybackSpeed.allCases.firstIndex(of: settings.speed) ?? 2) { index in
-                                    store.updateGlobal { $0.speed = PlaybackSpeed.allCases[index] }
-                                }
+                                SegmentedRow(options: speedChips,
+                                             selection: speedIndex,
+                                             onSelect: chooseSpeed)
                             }
                             RowDivider()
                             MenuSettingRow(title: "3DS CPU clock",
                                            subtitle: "How fast the emulated CPU runs. A separate setting: higher does not make playback faster, it makes the emulated machine faster",
-                                           options: EmulationSettings.cpuClockChoices.map {
-                                               MenuSettingRow<Int>.Option(title: "\($0)%", value: $0)
-                                           },
-                                           selection: settings.clampedClock) { percent in
+                                           options: EmulationSettings.cpuClockChoices
+                                               .filter { $0 != EmulationSettings.Default.cpuClockPercent }
+                                               .map { MenuSettingRow<Int>.Option(title: "\($0)%", value: $0) },
+                                           selection: settings.cpuClockPercent) { percent in
                                 store.updateGlobal { $0.cpuClockPercent = percent }
                             }
                             RowDivider()
@@ -368,9 +418,10 @@ struct EmulationView: View {
                                      subtitle: "Which market the emulated console reports. Region locking is the title's own, so a game that refuses to boot may be one that wants a different market.") {
                             MenuSettingRow(title: "3DS system region",
                                            subtitle: "Read when a game starts: restart a running game to apply it",
-                                           options: PlaybackRegion.allCases.map {
-                                               MenuSettingRow<PlaybackRegion>.Option(title: $0.title, value: $0)
-                                           },
+                                           defaultTitle: "Automatic",
+                                           options: PlaybackRegion.allCases
+                                               .filter { $0 != .automatic }
+                                               .map { MenuSettingRow<PlaybackRegion>.Option(title: $0.title, value: $0) },
                                            selection: settings.region) { region in
                                 store.updateGlobal { $0.region = region }
                             }
