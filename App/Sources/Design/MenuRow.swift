@@ -3,15 +3,14 @@ import SwiftUI
 /// A setting with more choices than a row can hold: the value on the right, a
 /// chevron, and the whole row opens the choices.
 ///
-/// The panel is `SelectionMenuOverlay` rather than SwiftUI's `Menu`. The system
-/// menu takes the appearance the app declares and centres itself over the card,
-/// which on this light design arrived as a dark sheet across the middle of the
-/// page — and neither of those is something a `Menu` can be told otherwise on
-/// iOS 14. This row's panel is light, hangs under the value it belongs to, and
-/// leaves the row and its subtitle readable while it is open.
+/// The panel is SwiftUI's own `Menu` around a `Picker`, not one of ours. With the
+/// app declaring a light appearance, the system panel arrives light, right
+/// beside the row, with the checkmark, the selection haptic and the anchoring
+/// behaviour coming from the system rather than from code here that has to be
+/// kept in step with it. It is also the panel VoiceOver already knows.
 ///
 /// `selection` is nil when nothing was ever chosen. The row then reads
-/// `defaultTitle` and the panel ticks that same line, so "never chosen" is a
+/// `defaultTitle` and the picker ticks that same line, so "never chosen" is a
 /// state the app can show. Choosing that line again reports nil rather than
 /// writing the default into storage as if it had been picked.
 struct MenuSettingRow<Value: Hashable>: View {
@@ -30,8 +29,6 @@ struct MenuSettingRow<Value: Hashable>: View {
     let selection: Value?
     let onSelect: (Value?) -> Void
 
-    @State private var valueFrame: CGRect = .zero
-
     init(title: String,
          subtitle: String? = nil,
          defaultTitle: String = "Default",
@@ -46,70 +43,47 @@ struct MenuSettingRow<Value: Hashable>: View {
         self.onSelect = onSelect
     }
 
-    /// Which option is in force, or nil when nothing was chosen.
-    private var chosen: Int? {
-        guard let selection = selection else { return nil }
-        return options.firstIndex { $0.value == selection }
-    }
-
     private var currentTitle: String {
-        guard let index = chosen else { return defaultTitle }
-        return options[index].title
+        guard let selection = selection,
+              let match = options.first(where: { $0.value == selection }) else {
+            return defaultTitle
+        }
+        return match.title
     }
 
     var body: some View {
-        Button(action: present) {
+        Menu {
+            // The untouched state is the first line and carries the tick when
+            // nothing was chosen, so the panel always shows what is in force.
+            Picker(title,
+                   selection: Binding(get: { selection },
+                                      set: { onSelect($0) })) {
+                Text(defaultTitle).tag(Optional<Value>.none)
+                ForEach(options, id: \.value) { option in
+                    Text(option.title).tag(Optional(option.value))
+                }
+            }
+        } label: {
             DesignRow(title, subtitle: subtitle) {
-                value
+                HStack(spacing: Design.Space.xxs) {
+                    Text(currentTitle)
+                        .font(Design.Fonts.caption.weight(.semibold))
+                        .foregroundColor(selection == nil ? Design.Palette.secondaryInk : Design.Palette.ink)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(Design.Palette.secondaryInk)
+                }
             }
             // A row with a subtitle is taller than this on its own; a short one
             // would not be, and every row in this app is at least 44 pt.
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressableStyle(scale: 0.995))
-        .pressHaptic()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(currentTitle)
         .accessibilityHint("Opens the choices")
         .accessibilityAddTraits(.isButton)
-    }
-
-    private var value: some View {
-        HStack(spacing: Design.Space.xxs) {
-            Text(currentTitle)
-                .font(Design.Fonts.caption.weight(.semibold))
-                .foregroundColor(selection == nil ? Design.Palette.secondaryInk : Design.Palette.ink)
-                .lineLimit(1)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(Design.Palette.secondaryInk)
-        }
-        // The panel hangs from this view, so its position on screen is measured
-        // as it is drawn.
-        .background(
-            GeometryReader { geometry in
-                Color.clear
-                    .onAppear { valueFrame = geometry.frame(in: .global) }
-                    .onChange(of: geometry.frame(in: .global)) { frame in
-                        valueFrame = frame
-                    }
-            }
-        )
-    }
-
-    private func present() {
-        let titles = [defaultTitle] + options.map { $0.title }
-        SelectionMenuCenter.shared.present(rowTitle: title,
-                                           items: titles,
-                                           selection: chosen.map { $0 + 1 } ?? 0,
-                                           anchor: valueFrame) { index in
-            if index == 0 {
-                onSelect(nil)
-            } else {
-                onSelect(options[index - 1].value)
-            }
-        }
     }
 }
