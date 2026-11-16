@@ -19,6 +19,9 @@ final class SettingsStore: ObservableObject {
         var layout: PlaybackLayout?
         var speed: PlaybackSpeed?
         var cpuClockPercent: Int?
+        /// The market this title reports itself as, when it differs from the
+        /// global setting. Read at boot, like the global value.
+        var region: PlaybackRegion?
         /// The experimental control layout, per title: a preset and the nudges
         /// that go with it. Keyed by `ControlSlot.rawValue`.
         var controlPreset: ControlPreset?
@@ -29,6 +32,7 @@ final class SettingsStore: ObservableObject {
                 && layout == nil
                 && speed == nil
                 && cpuClockPercent == nil
+                && region == nil
                 && controlPreset == nil
                 && (controlOffsets?.isEmpty ?? true)
         }
@@ -73,6 +77,7 @@ final class SettingsStore: ObservableObject {
         if let value = game.layout { result.layout = value }
         if let value = game.speed { result.speed = value }
         if let value = game.cpuClockPercent { result.cpuClockPercent = value }
+        if let value = game.region { result.region = value }
         if let value = game.controlPreset { result.controlPreset = value }
         return result
     }
