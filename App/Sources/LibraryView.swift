@@ -417,6 +417,15 @@ struct GameDetailView: View {
                                     }
                                 }
                             }
+                            RowDivider()
+                            SettingRow("Region", subtitle: overrideNote(gameOverride.region == nil)) {
+                                MenuChip(title: inheriting(gameOverride.region?.title, effective.region.title)) {
+                                    Button("Use global") { update { $0.region = nil } }
+                                    ForEach(PlaybackRegion.allCases) { region in
+                                        Button(region.title) { update { $0.region = region } }
+                                    }
+                                }
+                            }
 
                             if store.hasOverride(for: game.id) {
                                 Button(action: { store.clearOverride(for: game.id) }) {
