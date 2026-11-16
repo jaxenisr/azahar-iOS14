@@ -11,6 +11,10 @@ import AVFoundation
 /// The touch path is here for the same reason: it is three short stages — the tap
 /// arriving, the core asking for a pointer, the core seeing a press — and the
 /// counters say which stage is silent.
+///
+/// The sheet keeps the player's dark backdrop but its cards are the app's white
+/// ones, so every value inside a card is drawn in dark ink. The header is the only
+/// text on the backdrop, and it stays light.
 struct AudioDiagnosticsView: View {
     @Environment(\.presentationMode) private var presentationMode
     @ObservedObject private var store = SettingsStore.shared
@@ -64,7 +68,7 @@ struct AudioDiagnosticsView: View {
 
                     SettingsCard("Session") {
                         row("Graph", counters.available ? "built" : "refused",
-                            tint: counters.available ? Color.white.opacity(0.85) : .orange)
+                            tint: counters.available ? Design.Palette.ink : .orange)
                         row("State", counters.state)
                         row("Category", sessionInfo.category)
                         row("Route", sessionInfo.route)
@@ -76,7 +80,7 @@ struct AudioDiagnosticsView: View {
                     SettingsCard("Pipeline") {
                         row("Core rate", String(format: "%.0f Hz", counters.coreSampleRate))
                         row("Engine", counters.engineRunning ? "running" : "stopped",
-                            tint: counters.engineRunning ? Color.green.opacity(0.85) : .orange)
+                            tint: counters.engineRunning ? Design.Palette.positive : .orange)
                         row("Buffer", "\(counters.bufferedFrames) frames · \(String(format: "%.0f", counters.latencyMilliseconds)) ms")
                         row("Produced", "\(counters.produced) frames total")
                         row("Consumed", "\(counters.consumed) frames total")
@@ -87,22 +91,22 @@ struct AudioDiagnosticsView: View {
 
                     SettingsCard("Throughput") {
                         row("Callbacks", String(format: "%.1f/s · %llu total", rates.callbacks, callbacksTotal),
-                            tint: rates.callbacks > 0 ? Color.white.opacity(0.85) : .orange)
+                            tint: rates.callbacks > 0 ? Design.Palette.ink : .orange)
                         row("Produced/s", String(format: "%.0f frames", rates.produced))
                         row("Consumed/s", String(format: "%.0f frames", rates.consumed))
                         row("Underruns", "\(counters.underruns)",
-                            tint: counters.underruns > 0 ? .orange : Color.white.opacity(0.85))
+                            tint: counters.underruns > 0 ? .orange : Design.Palette.ink)
                         row("Dropped", "\(counters.dropped)",
-                            tint: counters.dropped > 0 ? .orange : Color.white.opacity(0.85))
+                            tint: counters.dropped > 0 ? .orange : Design.Palette.ink)
                     }
 
                     SettingsCard("Touch") {
                         row("Taps", "\(touch.taps)",
-                            tint: touch.taps > 0 ? Color.white.opacity(0.85) : .orange)
+                            tint: touch.taps > 0 ? Design.Palette.ink : .orange)
                         row("Polls", "\(touch.polls)",
-                            tint: touch.polls > 0 ? Color.white.opacity(0.85) : .orange)
+                            tint: touch.polls > 0 ? Design.Palette.ink : .orange)
                         row("Pressed frames", "\(touch.pressedFrames)",
-                            tint: touch.pressedFrames >= 2 ? Color.green.opacity(0.85) : .orange)
+                            tint: touch.pressedFrames >= 2 ? Design.Palette.positive : .orange)
                         hint("Tap the lower screen once and read the deltas: Taps +1, Polls above zero, Pressed frames +2 or more. Taps staying put means the tap never reached the emulator, and Pressed frames staying put while Polls climbs means the press is not being read as one.")
                     }
 
@@ -154,26 +158,26 @@ struct AudioDiagnosticsView: View {
                 .foregroundColor(.orange)
             Text(counters.failureReason ?? "No reason was given.")
                 .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.82))
+                .foregroundColor(Design.Palette.ink)
                 .fixedSize(horizontal: false, vertical: true)
             if let frames = counters.failureFrames, !frames.isEmpty {
                 Text(frames)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(Design.Palette.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text("Audio stays off and the emulator keeps running. The same text is in Documents/Azahar/log/frontend-crash.log.")
                 .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.45))
+                .foregroundColor(Design.Palette.secondaryInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func row(_ label: String, _ value: String, tint: Color = Color.white.opacity(0.85)) -> some View {
+    private func row(_ label: String, _ value: String, tint: Color = Design.Palette.ink) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(Theme.tertiaryInk)
+                .foregroundColor(Design.Palette.secondaryInk)
                 .frame(width: 104, alignment: .leading)
             Text(value)
                 .font(Theme.monospacedSmall)
@@ -186,7 +190,7 @@ struct AudioDiagnosticsView: View {
     private func hint(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundColor(.white.opacity(0.45))
+            .foregroundColor(Design.Palette.secondaryInk)
             .fixedSize(horizontal: false, vertical: true)
     }
 

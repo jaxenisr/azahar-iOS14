@@ -237,11 +237,14 @@ struct CircleButton: View {
 
 // MARK: - Floating capsule bar
 
-/// The navigation bar and any other floating strip: a capsule of blurred
-/// material with a hairline, sitting over the page.
+/// The navigation bar and any other floating strip: a white capsule with a
+/// hairline and a soft shadow, sitting over the page.
 ///
-/// It is deliberately the only blurred layer a screen may have, and it must not
-/// be inside anything that animates, or the blur is recomputed every frame.
+/// It was a blurred material, which over this near-white page reads as a grey
+/// slab — the one thing the design does not allow. White is also what the active
+/// pill needs behind it: the lavender pill on white is the selection, the same
+/// way it reads in the chips. Blur is still used, but only behind the library's
+/// detail pane.
 struct FloatingCapsuleBar<Content: View>: View {
     let content: Content
 
@@ -254,9 +257,7 @@ struct FloatingCapsuleBar<Content: View>: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
             .background(
-                BlurBackdrop(style: .systemMaterial)
-                    .clipShape(Capsule())
-                    .allowsHitTesting(false)
+                Capsule().fill(Design.Palette.card)
             )
             .overlay(
                 Capsule().stroke(Design.Palette.hairline, lineWidth: 1)
