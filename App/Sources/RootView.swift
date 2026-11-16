@@ -43,9 +43,6 @@ struct RootView: View {
             }
         }
         .background(Design.Palette.background.ignoresSafeArea())
-        // One panel host for the whole app, so a list of choices is drawn above
-        // every card and cannot be clipped by the card it belongs to.
-        .overlay(SelectionMenuOverlay())
     }
 
     @ViewBuilder
