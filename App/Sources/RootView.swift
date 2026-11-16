@@ -365,8 +365,15 @@ struct EmulationView: View {
                         .entrance(1)
 
                         SettingsCard("Region",
-                                     subtitle: "Which market the emulated console reports. Some titles refuse to boot outside their own region.") {
-                            PlaceholderRow(feature: .regionOverride)
+                                     subtitle: "Which market the emulated console reports. Region locking is the title's own, so a game that refuses to boot may be one that wants a different market.") {
+                            MenuSettingRow(title: "3DS system region",
+                                           subtitle: "Read when a game starts: restart a running game to apply it",
+                                           options: PlaybackRegion.allCases.map {
+                                               MenuSettingRow<PlaybackRegion>.Option(title: $0.title, value: $0)
+                                           },
+                                           selection: settings.region) { region in
+                                store.updateGlobal { $0.region = region }
+                            }
                         }
                         .entrance(2)
 

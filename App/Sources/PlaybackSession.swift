@@ -273,6 +273,12 @@ final class PlaybackSession: ObservableObject, Identifiable {
         AZCoreSetOption("citra_layout_option", settings.layout.rawValue)
         AZCoreSetOption("layout_option", settings.layout.rawValue)
         AZCoreSetOption("citra_cpu_clock_percentage", "\(settings.clampedClock)")
+        // Region is read once, when the console is set up: it is what the emulated
+        // machine reports about itself, so a title that region-locks has to be
+        // restarted after the setting changes. Only the prefixed name is given
+        // here because the core's own value is an integer while this option takes
+        // a region name, and the alias would be read as the wrong type.
+        AZCoreSetOption("citra_region_value", settings.region.rawValue)
         // The core reads touch from the pointer device; there is no mouse here.
         AZCoreSetOption("citra_enable_touch_touchscreen", "enabled")
         AZCoreSetOption("citra_enable_mouse_touchscreen", "disabled")
