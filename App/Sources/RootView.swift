@@ -508,8 +508,6 @@ struct EmulationView: View {
                                      subtitle: "Real plans, not shipped. Each row turns itself on once the work behind it lands.") {
                             PlaceholderRow(feature: .cameraFeed)
                             RowDivider()
-                            PlaceholderRow(feature: .articBase)
-                            RowDivider()
                             PlaceholderRow(feature: .cpuJIT)
                         }
                         .entrance(8)
