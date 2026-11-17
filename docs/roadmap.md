@@ -44,6 +44,19 @@ source at tag `2127.0-rc3`, never by guessing what it supports.
   is compiled by `scripts/build-core.sh` with the core's own flags and merged into
   `libazahar_core.a`: Azahar is not forked, and the app calls the same service the
   desktop frontend's "Load Amiibo" does.
+- **Artic Base**: streaming, from the Games page's menu. The address is the
+  content: `articbase://<host>[:<port>]` is dispatched by the core's own loader
+  (`src/core/loader/loader.cpp`), which reads port 5543 when none is given and
+  hands the rest to `Apploader_Artic`. So the app types an address and the core
+  connects inside the load — no socket here, and no title picker either, because
+  the console reports which title it is running. Nothing is copied into
+  `Documents/ROMs`, and a stream is the same player as a file: frames and audio
+  come from the core like any other content, so the HUD, the controls, save states
+  and the amiibo sheet work unchanged. A save state is kept per address rather than
+  per title, because a streamed title has no file here to name the slot after.
+  `NSLocalNetworkUsageDescription` and `_articbase._tcp` were already in
+  `App/Info.plist`, so the permission the first connection needs was declared
+  before the feature existed.
 
 ## 1. The camera
 
@@ -60,16 +73,7 @@ follow.
 Dependency: the usage string, and a device to judge. Neither can be verified in CI
 beyond compiling.
 
-## 2. Artic Base
-
-Streaming content from a PC instead of copying it to the iPad. The core already
-dispatches `articbase://<ip>[:<port>]` in `src/core/loader/loader.cpp`, so the work
-is a small client-side pairing UI plus the audio/video session, and the risk is
-that it becomes a second way to load a game that drifts from the first.
-
-Dependency: a server to talk to, which means it cannot be finished here.
-
-## 3. A CPU JIT, if the OS ever allows one
+## 2. A CPU JIT, if the OS ever allows one
 
 FastInterp is what runs now, and it is the reason the CPU side is as fast as it
 is without an executable-memory entitlement. A JIT needs

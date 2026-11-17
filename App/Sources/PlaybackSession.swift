@@ -307,9 +307,9 @@ final class PlaybackSession: ObservableObject, Identifiable {
         AZCoreSetFrameCallback(playbackFrameCallback, context)
         AZCoreSetMessageCallback(playbackMessageCallback, context)
 
-        let loaded = AZCoreLoadGame(game.url.path)
+        let loaded = AZCoreLoadGame(game.location)
         if !loaded {
-            let reason = AZCoreLastError() ?? "the core refused to load this file"
+            let reason = loadFailure(AZCoreLastError())
             AZCoreSetFrameCallback(nil, nil)
             AZCoreSetMessageCallback(nil, nil)
             AZCoreSetAudioCallback(nil, nil)
@@ -432,6 +432,22 @@ final class PlaybackSession: ObservableObject, Identifiable {
         publish { $0.phase = .finished }
     }
 
+    /// What the player says when the core refuses the content.
+    ///
+    /// A file fails with the core's own words. A stream does not: a console that
+    /// does not answer, or answers with a version this core does not speak, comes
+    /// back as a bare status code, so the sentence that helps the user is this
+    /// one, and the core's text is kept after it rather than replaced.
+    private func loadFailure(_ coreMessage: String?) -> String {
+        guard game.url == nil else {
+            return coreMessage ?? "the core refused to load this content"
+        }
+        let address = game.location.replacingOccurrences(of: "articbase://", with: "")
+        let said = coreMessage.map { " The core said: \($0)" } ?? ""
+        return "No answer from \(address). The console has to be on this network with Artic Base "
+            + "running, and this app has to be allowed on the local network.\(said)"
+    }
+
     /// Sleeps until the deadline without spinning a core flat. `usleep` may wake
     /// early; the loop simply sleeps the remainder.
     private func pace(until deadline: CFTimeInterval) {
@@ -503,3 +519,4 @@ private let playbackAudioCallback: AZCoreAudioCallback = { frames, frameCount, _
     guard let frames = frames, frameCount > 0 else { return }
     AudioOutput.shared.write(frames, frameCount: Int(frameCount))
 }
+

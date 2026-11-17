@@ -3,7 +3,12 @@ import UIKit
 
 struct GameEntry: Identifiable, Equatable {
     let id: String
-    let url: URL
+    /// What the core is handed. For a file that is its path; for Artic Base it is
+    /// `articbase://<host>[:<port>]`, which the core's own loader parses.
+    let location: String
+    /// Where the content is on this device, or nil for a stream: there is no file
+    /// to open, to read a title id out of, or to remove.
+    let url: URL?
     let title: String
     let icon: UIImage?
     let subtitle: String
@@ -89,7 +94,8 @@ final class GameLibrary: ObservableObject {
     }
 
     func remove(_ game: GameEntry) {
-        try? fileManager.removeItem(at: game.url)
+        guard let url = game.url else { return }
+        try? fileManager.removeItem(at: url)
         reload()
     }
 
@@ -115,6 +121,7 @@ final class GameLibrary: ObservableObject {
             let title = metadata.title ?? url.deletingPathExtension().lastPathComponent
             let subtitle = "\(ext.uppercased())  ·  \(GameLibrary.format(size))"
             entries.append(GameEntry(id: name,
+                                     location: url.path,
                                      url: url,
                                      title: title,
                                      icon: metadata.icon,

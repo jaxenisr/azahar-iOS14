@@ -62,7 +62,9 @@ forwards `info->path` to `Core::System::Load()` - so streaming needs no core
 patch, no core option, and no fork. The frontend only has to hand over the
 pseudo-path.
 
-Not yet wired into the UI; it is a library-entry decision, not an engine change.
+Wired up in `App/Sources/ArticBase.swift`: the Games page's menu takes an address
+and hands `articbase://<host>[:<port>]` to the core as the content path, which is
+the whole frontend side of streaming — the pseudo-path is the interface.
 
 ### iOS is forced JIT-less inside the core
 

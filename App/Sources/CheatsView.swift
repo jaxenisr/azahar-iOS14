@@ -82,8 +82,9 @@ struct CheatsCard: View {
         let coreDirectory = library.coreDirectory
         DispatchQueue.global(qos: .userInitiated).async {
             let rows = games.map { game -> Row in
-                let titleID = ROMReader.titleID(url: game.url,
-                                                fileExtension: game.url.pathExtension)
+                let titleID = game.url.flatMap { url in
+                    ROMReader.titleID(url: url, fileExtension: url.pathExtension)
+                }
                 let document = titleID.flatMap {
                     CheatDocument.load(titleID: $0, coreDirectory: coreDirectory)
                 }
