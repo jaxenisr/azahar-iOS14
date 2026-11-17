@@ -23,7 +23,7 @@ static bool probe(void) {
         return false;
     }
 
-heyy    bool works = false;
+    bool works = false;
     if (mprotect(memory, size, PROT_READ | PROT_WRITE) == 0) {
         uint32_t *instructions = (uint32_t *)memory;
         instructions[0] = kAnswer;
