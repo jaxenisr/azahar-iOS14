@@ -394,6 +394,20 @@ struct EmulationView: View {
                                            selection: settings.textureFilter) { filter in
                                 store.updateGlobal { $0.textureFilter = filter }
                             }
+                            RowDivider()
+                            SettingRow("Texture packs",
+                                       subtitle: "Replace the title's textures with the files in Documents/Azahar/load/textures/<title id>. Read when playback starts, and the memory comes out of the same 3 GB") {
+                                SettingsToggle(isOn: settings.customTexturesEnabled) { value in
+                                    store.updateGlobal { $0.customTexturesEnabled = value }
+                                }
+                            }
+                            RowDivider()
+                            SettingRow("Dump textures",
+                                       subtitle: "Write the textures a title loads to Documents/Azahar/dump/textures, for making a pack. Not a way to play: it costs storage and frames") {
+                                SettingsToggle(isOn: settings.dumpTexturesEnabled) { value in
+                                    store.updateGlobal { $0.dumpTexturesEnabled = value }
+                                }
+                            }
                         }
                         .entrance(0)
 
@@ -484,20 +498,21 @@ struct EmulationView: View {
                         CheatsCard()
                             .entrance(5)
 
-                        ExperimentalControlsCard()
+                        TexturePacksCard()
                             .entrance(6)
+
+                        ExperimentalControlsCard()
+                            .entrance(7)
 
                         SettingsCard("Not available yet",
                                      subtitle: "Real plans, not shipped. Each row turns itself on once the work behind it lands.") {
-                            PlaceholderRow(feature: .texturePacks)
-                            RowDivider()
                             PlaceholderRow(feature: .cameraFeed)
                             RowDivider()
                             PlaceholderRow(feature: .articBase)
                             RowDivider()
                             PlaceholderRow(feature: .cpuJIT)
                         }
-                        .entrance(7)
+                        .entrance(8)
                     }
                 }
                 // Room for the compact bar when the page scrolls under it.
