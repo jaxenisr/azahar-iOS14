@@ -1,7 +1,10 @@
 #include "JITProbe.h"
 
 #include <libkern/OSCacheControl.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/mman.h>
 
 // The four steps below are the ones oaknut's CodeBlock takes on iOS, at the
@@ -15,6 +18,48 @@
 // ARM64: `mov w0, #42` then `ret`.
 static const uint32_t kAnswer = 0x52800540u; // mov w0, #42
 static const uint32_t kReturn = 0xD65F03C0u; // ret
+
+// A jump into memory the OS does not consider code traps rather than returning.
+// That is exactly the situation the probe exists to tell apart, so the call is
+// made inside a guard: the two signals a bad jump raises are caught, the probe
+// answers "no", and the process keeps running. A fault that arrives while the
+// guard is not armed is handed to the handler that was there before, so no other
+// part of the app loses its crash handling because of this.
+static sigjmp_buf g_fault_jump;
+static volatile sig_atomic_t g_guard_armed = 0;
+static struct sigaction g_previous_segv;
+static struct sigaction g_previous_bus;
+
+static void fault_handler(int number) {
+    if (g_guard_armed) {
+        g_guard_armed = 0;
+        siglongjmp(g_fault_jump, 1);
+    }
+    sigaction(SIGSEGV, &g_previous_segv, NULL);
+    sigaction(SIGBUS, &g_previous_bus, NULL);
+    raise(number);
+}
+
+static bool guard_signals(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = fault_handler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    if (sigaction(SIGSEGV, &action, &g_previous_segv) != 0) {
+        return false;
+    }
+    if (sigaction(SIGBUS, &action, &g_previous_bus) != 0) {
+        sigaction(SIGSEGV, &g_previous_segv, NULL);
+        return false;
+    }
+    return true;
+}
+
+static void unguard_signals(void) {
+    sigaction(SIGSEGV, &g_previous_segv, NULL);
+    sigaction(SIGBUS, &g_previous_bus, NULL);
+}
 
 static bool probe(void) {
     const size_t size = 16384;
@@ -32,8 +77,21 @@ static bool probe(void) {
             // Written through a writable alias and executed through another one:
             // the instruction cache is not coherent with the data cache.
             sys_icache_invalidate(memory, size);
-            int32_t (*answer)(void) = (int32_t (*)(void))memory;
-            works = answer() == 42;
+            // Without the guard the call is not made at all: an answer that could
+            // only be learnt by dying is not worth having.
+            if (guard_signals()) {
+                int32_t (*answer)(void) = (int32_t (*)(void))memory;
+                // savemask 1: a fault blocks signals while it is handled, and the
+                // jump back has to put the mask the way it was.
+                if (sigsetjmp(g_fault_jump, 1) == 0) {
+                    g_guard_armed = 1;
+                    works = answer() == 42;
+                    g_guard_armed = 0;
+                } else {
+                    works = false;
+                }
+                unguard_signals();
+            }
         }
     }
 
