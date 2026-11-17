@@ -481,13 +481,14 @@ struct EmulationView: View {
                         }
                         .entrance(4)
 
-                        ExperimentalControlsCard()
+                        CheatsCard()
                             .entrance(5)
+
+                        ExperimentalControlsCard()
+                            .entrance(6)
 
                         SettingsCard("Not available yet",
                                      subtitle: "Real plans, not shipped. Each row turns itself on once the work behind it lands.") {
-                            PlaceholderRow(feature: .cheats)
-                            RowDivider()
                             PlaceholderRow(feature: .texturePacks)
                             RowDivider()
                             PlaceholderRow(feature: .cameraFeed)
@@ -496,7 +497,7 @@ struct EmulationView: View {
                             RowDivider()
                             PlaceholderRow(feature: .cpuJIT)
                         }
-                        .entrance(6)
+                        .entrance(7)
                     }
                 }
                 // Room for the compact bar when the page scrolls under it.
