@@ -9,10 +9,6 @@ import Foundation
 ///
 /// Nothing here is a PlayStation option: this list is the 3DS core's own set.
 enum PlannedFeature: String, CaseIterable, Identifiable {
-    /// New 3DS mode: the core option exists, nothing in the app writes it yet.
-    case new3DSMode
-    /// Texture filter: the core option exists under two names, no UI mapping yet.
-    case textureFilter
     /// Cheats: the core has no cheat loader wired in this build.
     case cheats
     /// Custom texture packs: not wired, and the memory cost is a real risk on 3 GB.
@@ -29,8 +25,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// The row's title, as it will read on the settings screen.
     var title: String {
         switch self {
-        case .new3DSMode: return "New 3DS mode"
-        case .textureFilter: return "Texture filter"
         case .cheats: return "Cheats"
         case .texturePacks: return "Texture packs"
         case .cameraFeed: return "Camera"
@@ -43,10 +37,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// under its title, so it has to be true rather than reassuring.
     var missing: String {
         switch self {
-        case .new3DSMode:
-            return "Core option exists, the app never sets it"
-        case .textureFilter:
-            return "Core option exists, no UI mapping"
         case .cheats:
             return "No cheat loader in this build"
         case .texturePacks:
@@ -63,8 +53,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// The one line to change when a feature is wired up.
     var isAvailable: Bool {
         switch self {
-        case .new3DSMode: return false
-        case .textureFilter: return false
         case .cheats: return false
         case .texturePacks: return false
         case .cameraFeed: return false

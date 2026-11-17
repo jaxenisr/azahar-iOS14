@@ -386,7 +386,14 @@ struct EmulationView: View {
                                 store.updateGlobal { $0.layout = layout }
                             }
                             RowDivider()
-                            PlaceholderRow(feature: .textureFilter)
+                            MenuSettingRow(title: "Texture filter",
+                                           subtitle: "Applied when playback starts. Filtering costs frames, and this device has none to spare",
+                                           options: TextureFilter.allCases
+                                               .filter { $0 != EmulationSettings.Default.textureFilter }
+                                               .map { MenuSettingRow<TextureFilter>.Option(title: $0.title, value: $0) },
+                                           selection: settings.textureFilter) { filter in
+                                store.updateGlobal { $0.textureFilter = filter }
+                            }
                         }
                         .entrance(0)
 
@@ -407,7 +414,14 @@ struct EmulationView: View {
                                 store.updateGlobal { $0.cpuClockPercent = percent }
                             }
                             RowDivider()
-                            PlaceholderRow(feature: .new3DSMode)
+                            MenuSettingRow(title: "Console model",
+                                           subtitle: "New 3DS has the faster CPU and the memory some titles require; the original is lighter. Restart a running game to apply it",
+                                           options: ConsoleModel.allCases
+                                               .filter { $0 != EmulationSettings.Default.consoleModel }
+                                               .map { MenuSettingRow<ConsoleModel>.Option(title: $0.title, value: $0) },
+                                           selection: settings.consoleModel) { model in
+                                store.updateGlobal { $0.consoleModel = model }
+                            }
                         }
                         .entrance(1)
 

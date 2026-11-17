@@ -30,8 +30,10 @@ Tested on an iPad 8th gen (A12) running iPadOS 14.7.1.
 - Working touchscreen on the lower screen, in game and in menus.
 - Working sound through the speaker.
 - Controls drawn in the margins so they never cover the game, plus MFi controllers.
-- Per-title settings: resolution scale, screen layout, speed, CPU clock, volume,
-  control opacity and size.
+- Per-title settings: resolution scale, screen layout, speed, CPU clock, region,
+  volume, control opacity and size.
+- Console model (New 3DS or the original), texture filter and system region on the
+  Emulation page, all read when a game starts.
 - A HUD with real numbers: fps, speed %, frame time, audio buffer and underruns.
 
 ## Performance, honestly
