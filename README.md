@@ -41,6 +41,8 @@ Tested on an iPad 8th gen (A12) running iPadOS 14.7.1.
 - Amiibo: a dump per figure in `Documents/Azahar/amiibo`, loaded from the player
   while the game is asking for a tag. The core writes progress back into its copy,
   so your own dump is never modified.
+- Artic Base: stream the title a console on your network has open, from the Games
+  page's menu. The address is all it asks for, and nothing is copied to the iPad.
 - A HUD with real numbers: fps, speed %, frame time, audio buffer and underruns.
 
 ## Performance, honestly
