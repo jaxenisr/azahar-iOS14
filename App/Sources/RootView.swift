@@ -436,6 +436,17 @@ struct EmulationView: View {
                                            selection: settings.consoleModel) { model in
                                 store.updateGlobal { $0.consoleModel = model }
                             }
+                            RowDivider()
+                            // Not a choice: whether generated code may run is a
+                            // property of the process this app was launched in,
+                            // so the row reports it instead of offering it.
+                            SettingRow("CPU JIT", subtitle: CPUJIT.explanation) {
+                                Text(CPUJIT.state)
+                                    .font(Design.Fonts.caption.weight(.semibold))
+                                    .foregroundColor(CPUJIT.isAvailable
+                                                     ? Design.Palette.accent
+                                                     : Design.Palette.secondaryInk)
+                            }
                         }
                         .entrance(1)
 
@@ -507,8 +518,6 @@ struct EmulationView: View {
                         SettingsCard("Not available yet",
                                      subtitle: "Real plans, not shipped. Each row turns itself on once the work behind it lands.") {
                             PlaceholderRow(feature: .cameraFeed)
-                            RowDivider()
-                            PlaceholderRow(feature: .cpuJIT)
                         }
                         .entrance(8)
                     }

@@ -66,7 +66,7 @@ Wired up in `App/Sources/ArticBase.swift`: the Games page's menu takes an addres
 and hands `articbase://<host>[:<port>]` to the core as the content path, which is
 the whole frontend side of streaming — the pseudo-path is the interface.
 
-### iOS is forced JIT-less inside the core
+### iOS is forced JIT-less inside the core, and the app overrides it per load
 
 `src/citra_libretro/core_settings.cpp`:
 
@@ -74,7 +74,29 @@ the whole frontend side of streaming — the pseudo-path is the interface.
 - `use_shader_jit = false` on `IOS`
 - `use_fastinterp` defaults to enabled
 
-So the ARM11 runs on FastInterp and the CPU-side shader engine runs interpreted.
+Those are written every time the core reads its options, which is the start of
+every load (`retro_load_game` calls `UpdateSettings`, which calls
+`ParseCoreOptions`). `Core::System::Init` reads `use_cpu_jit` when it builds the
+CPU (`src/core/core.cpp`), and on arm64 that value is the whole decision between
+Dynarmic and FastInterp. So the window between the two is the only place a
+frontend can change the answer, and it is reachable: the first thing the core asks
+inside `retro_load_game` is the pixel format, which
+`App/Bridge/CoreBridge.mm` handles, and `App/CoreExtras/JitLink.cpp` sets
+`Settings::values.use_cpu_jit` there.
+
+Whether the JIT may run at all is a property of the process, not of this app's
+source: iOS refuses writable-then-executable memory unless something outside the
+app has allowed it (TrollStore's JIT before launch, or a debugger attached to a
+build carrying `get-task-allow`). `App/Bridge/JITProbe.c` proves it the only way
+that can be trusted — it performs the same four steps Dynarmic's code cache does
+through oaknut on iOS (`mmap` executable, `mprotect` writable, write an
+instruction, `mprotect` executable, call it) and only then is Dynarmic requested.
+A JIT in a process without that permission faults rather than falling back, which
+is why the probe runs code rather than checking a flag. With no proof, the core
+interprets, which is how this app has always played.
+
+`use_shader_jit` stays false: it is the core's x64 shader compiler, and this is
+arm64.
 
 ### Rendering on iOS is Vulkan through MoltenVK
 

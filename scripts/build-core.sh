@@ -48,15 +48,22 @@ cmake -S "$AZ" -B "$BUILD" \
 
 cmake --build "$BUILD" --target citra_libretro --config Release -j "$(sysctl -n hw.ncpu)"
 
-# The frontend translation unit: the amiibo reader has no libretro entry point,
-# so App/CoreExtras/AmiiboLink.cpp is compiled against the core's headers and
-# merged into the archive beside it. It is compiled with the flags CMake used for
-# the core itself (taken from the core target's flags.make) rather than with a
-# second, hand-written set, so the sysroot, the deployment target, the standard
-# and the include paths cannot drift from the core it links against.
-SHIM_SRC="$ROOT/App/CoreExtras/AmiiboLink.cpp"
-SHIM_OBJ="$ROOT/build/core-extras/AmiiboLink.cpp.o"
-mkdir -p "$(dirname "$SHIM_OBJ")"
+# The frontend translation units: pieces the libretro core has no entry point for
+# (the amiibo reader, the CPU-JIT switch) are compiled against the core's headers
+# and merged into the archive beside it. They are compiled with the flags CMake
+# used for the core itself (taken from the core target's flags.make) rather than
+# with a second, hand-written set, so the sysroot, the deployment target, the
+# standard and the include paths cannot drift from the core they link against.
+#
+# Each entry is "file:symbol the app calls". The symbol is checked here, because a
+# shim that compiled but exported nothing would otherwise fail only when the app
+# links.
+SHIMS=(
+    "AmiiboLink.cpp:AZCoreAmiiboLoad"
+    "JitLink.cpp:AZCoreRequestJIT"
+)
+SHIM_OBJS=()
+mkdir -p "$ROOT/build/core-extras"
 
 FLAGS_FILE="$(find "$BUILD" -path '*CMakeFiles/core.dir/flags.make' -print -quit)"
 if [[ -z "$FLAGS_FILE" ]]; then
@@ -75,12 +82,20 @@ CXX_DEFINES="$(sed -n 's/^CXX_DEFINES = //p' "$FLAGS_FILE")"
 CXX_INCLUDES="$(sed -n 's/^CXX_INCLUDES = //p' "$FLAGS_FILE")"
 CXX_FLAGS="$(sed -n 's/^CXX_FLAGS = //p' "$FLAGS_FILE")"
 
-echo "Compiling frontend shim with $(basename "$(dirname "$(dirname "$FLAGS_FILE")")") flags ..."
-eval "\"$CXX\" $CXX_DEFINES $CXX_INCLUDES $CXX_FLAGS -c \"$SHIM_SRC\" -o \"$SHIM_OBJ\""
-if ! nm -g "$SHIM_OBJ" 2>/dev/null | grep -q '_AZCoreAmiiboLoad'; then
-    echo "error: $SHIM_OBJ does not define the amiibo entry points" >&2
-    exit 1
-fi
+for shim in "${SHIMS[@]}"; do
+    SHIM_SRC="$ROOT/App/CoreExtras/${shim%%:*}"
+    SHIM_SYMBOL="${shim##*:}"
+    SHIM_OBJ="$ROOT/build/core-extras/$(basename "$SHIM_SRC").o"
+
+    echo "Compiling $(basename "$SHIM_SRC") with $(basename "$(dirname "$(dirname "$FLAGS_FILE")")") flags ..."
+    eval "\"$CXX\" $CXX_DEFINES $CXX_INCLUDES $CXX_FLAGS -c \"$SHIM_SRC\" -o \"$SHIM_OBJ\""
+    if ! nm -g "$SHIM_OBJ" 2>/dev/null | grep -q "_${SHIM_SYMBOL}"; then
+        echo "error: $SHIM_OBJ does not define ${SHIM_SYMBOL}" >&2
+        exit 1
+    fi
+
+    SHIM_OBJS+=("$SHIM_OBJ")
+done
 
 # Objects of the libretro entry point and its object libraries, plus every static
 # archive Azahar and its dependency libraries produced (core, video_core,
@@ -103,9 +118,11 @@ LIST="$(mktemp)"
         -not -path '*CMakeFiles/CMakeFiles*' -print
 } | sort -u > "$LIST"
 
-# The frontend shim is an input of its own: it is built above, outside $BUILD,
-# precisely so the object patterns above cannot pick it up twice.
-echo "$SHIM_OBJ" >> "$LIST"
+# The frontend shims are inputs of their own: they are built above, outside
+# $BUILD, precisely so the object patterns above cannot pick them up twice.
+for shim_object in "${SHIM_OBJS[@]}"; do
+    echo "$shim_object" >> "$LIST"
+done
 
 count="$(wc -l < "$LIST" | tr -d ' ')"
 echo "Merging $count inputs into $OUT/libazahar_core.a"
@@ -166,21 +183,24 @@ if ! printf '%s' "$ENTRY_SYMBOLS" | grep -q '_retro_init'; then
     exit 1
 fi
 
-# Same check for the frontend shim: the app calls these three symbols, so a merge
-# that dropped the member would fail at link, not at run.
-SHIM_MEMBER="$(basename "$SHIM_OBJ")"
-if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$SHIM_MEMBER" ); then
-    echo "error: $SHIM_MEMBER is missing from the merged archive" >&2
-    rm -rf "$VERIFY"
-    exit 1
-fi
-SHIM_SYMBOLS="$( { nm -g "$VERIFY/$SHIM_MEMBER" 2>/dev/null || true; } )"
-if ! printf '%s' "$SHIM_SYMBOLS" | grep -q '_AZCoreAmiiboLoad'; then
-    echo "error: $SHIM_MEMBER does not export AZCoreAmiiboLoad" >&2
-    printf '%s\n' "$SHIM_SYMBOLS" | head -40 >&2
-    rm -rf "$VERIFY"
-    exit 1
-fi
+# Same check for the frontend shims: the app calls their symbols, so a merge that
+# dropped a member would fail at link, not at run.
+for shim in "${SHIMS[@]}"; do
+    SHIM_MEMBER="$(basename "${shim%%:*}").o"
+    SHIM_SYMBOL="${shim##*:}"
+    if ! ( cd "$VERIFY" && ar -x "$OUT/libazahar_core.a" "$SHIM_MEMBER" ); then
+        echo "error: $SHIM_MEMBER is missing from the merged archive" >&2
+        rm -rf "$VERIFY"
+        exit 1
+    fi
+    SHIM_SYMBOLS="$( { nm -g "$VERIFY/$SHIM_MEMBER" 2>/dev/null || true; } )"
+    if ! printf '%s' "$SHIM_SYMBOLS" | grep -q "_${SHIM_SYMBOL}"; then
+        echo "error: $SHIM_MEMBER does not export ${SHIM_SYMBOL}" >&2
+        printf '%s\n' "$SHIM_SYMBOLS" | head -40 >&2
+        rm -rf "$VERIFY"
+        exit 1
+    fi
+done
 rm -rf "$VERIFY"
 
 ls -lh "$OUT"/*.a

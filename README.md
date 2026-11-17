@@ -1,6 +1,6 @@
 # Azahar for iPadOS 14
 
-Play 3DS games on an iPad that can't be updated. No JIT, no OS upgrade, free.
+Play 3DS games on an iPad that can't be updated. No OS upgrade, free.
 
 3DS emulation powered by [Azahar](https://github.com/azahar-emu/azahar) (GPLv3+).
 
@@ -41,13 +41,19 @@ Tested on an iPad 8th gen (A12) running iPadOS 14.7.1.
 - Amiibo: a dump per figure in `Documents/Azahar/amiibo`, loaded from the player
   while the game is asking for a tag. The core writes progress back into its copy,
   so your own dump is never modified.
+- CPU JIT when the install allows one: if the app can run code it generates —
+  TrollStore's JIT before launch, or a debugger attached to a build signed with
+  `get-task-allow` — the emulated ARM11 is compiled as it runs. The Emulation page
+  says which is in force; without that permission the CPU is interpreted.
 - Artic Base: stream the title a console on your network has open, from the Games
   page's menu. The address is all it asks for, and nothing is copied to the iPad.
 - A HUD with real numbers: fps, speed %, frame time, audio buffer and underruns.
 
 ## Performance, honestly
 
-No JIT means the CPU is interpreted, so what runs well depends on the game:
+Without JIT the CPU is interpreted, so what runs well depends on the game (with
+JIT enabled the CPU side gets substantially faster; nothing here has been timed on
+a device with it, so no number is claimed):
 
 - **Full speed:** 2D and light 3D games.
 - **90-100%:** mid-weight titles, with occasional dips.
