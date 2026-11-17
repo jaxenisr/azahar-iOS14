@@ -105,6 +105,60 @@ enum PlaybackRegion: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Which console the core pretends to be.
+///
+/// The core's option is `citra_is_new_3ds`, its values are `New 3DS` and
+/// `Old 3DS`, and its **default is New 3DS** — so that is what this app has been
+/// running, whether or not anyone chose it. New 3DS brings the faster CPU and the
+/// extra memory some titles require; the original model is lighter, which matters
+/// on a 3 GB device. Read at load, so a running game keeps the model it started
+/// with.
+enum ConsoleModel: String, Codable, CaseIterable, Identifiable {
+    case new3DS = "New 3DS"
+    case old3DS = "Old 3DS"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .new3DS: return "New 3DS"
+        case .old3DS: return "Original 3DS"
+        }
+    }
+}
+
+/// The core's texture filter (`citra_texture_filter`).
+///
+/// Only the values the pinned core actually honours are offered. Two are left out
+/// on purpose, both established by reading `src/citra_libretro/core_settings.cpp`
+/// at tag `2127.0-rc3`:
+///
+/// - `Anime4K` is in the option list, but `GetTextureFilter` returns `NoFilter`
+///   whenever the graphics API is Vulkan — and Vulkan is the only API this app
+///   can present through on iOS;
+/// - the parser compares against `"xBRZ freescale"` while the option list
+///   advertises `"xBRZ"`, so that choice can never be applied either.
+///
+/// A row that cannot change the picture is worse than no row, so neither is
+/// offered. Read at load, with the rest of the graphics options.
+enum TextureFilter: String, Codable, CaseIterable, Identifiable {
+    case none = "none"
+    case bicubic = "Bicubic"
+    case scaleForce = "ScaleForce"
+    case mmpX = "MMPX"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "None"
+        case .bicubic: return "Bicubic"
+        case .scaleForce: return "ScaleForce"
+        case .mmpX: return "MMPX"
+        }
+    }
+}
+
 /// One playback's settings: global defaults with any per-game overrides already
 /// applied.
 struct EmulationSettings: Codable, Equatable {
@@ -118,6 +172,8 @@ struct EmulationSettings: Codable, Equatable {
         static let speed: PlaybackSpeed = .normal
         static let cpuClockPercent = 100
         static let region: PlaybackRegion = .automatic
+        static let consoleModel: ConsoleModel = .new3DS
+        static let textureFilter: TextureFilter = .none
     }
 
     /// nil: never chosen. The app uses `Default` and says so.
@@ -128,6 +184,10 @@ struct EmulationSettings: Codable, Equatable {
     /// Read at boot by the core; `Automatic` is what every title used before this
     /// setting existed.
     var region: PlaybackRegion?
+    /// The console the core emulates. `New 3DS` is the core's own default, so the
+    /// untouched state is what this app has always played at.
+    var consoleModel: ConsoleModel?
+    var textureFilter: TextureFilter?
     var volume: Double = 0.8
     var isMuted: Bool = false
     var hapticsEnabled: Bool = true
@@ -163,6 +223,10 @@ struct EmulationSettings: Codable, Equatable {
                                                    Default.cpuClockPercent)
         region = EmulationSettings.chosen(try container.decodeIfPresent(PlaybackRegion.self, forKey: .region),
                                           Default.region)
+        consoleModel = EmulationSettings.chosen(try container.decodeIfPresent(ConsoleModel.self, forKey: .consoleModel),
+                                                Default.consoleModel)
+        textureFilter = EmulationSettings.chosen(try container.decodeIfPresent(TextureFilter.self, forKey: .textureFilter),
+                                                 Default.textureFilter)
         volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0.8
         isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
         hapticsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
@@ -173,7 +237,7 @@ struct EmulationSettings: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case resolutionScale, layout, speed, cpuClockPercent, region
+        case resolutionScale, layout, speed, cpuClockPercent, region, consoleModel, textureFilter
         case volume, isMuted, hapticsEnabled, controlsOpacity, controlsScale
         case customControlsEnabled, controlPreset
     }
@@ -204,6 +268,8 @@ struct EmulationSettings: Codable, Equatable {
     }
 
     var effectiveRegion: PlaybackRegion { region ?? Default.region }
+    var effectiveConsoleModel: ConsoleModel { consoleModel ?? Default.consoleModel }
+    var effectiveTextureFilter: TextureFilter { textureFilter ?? Default.textureFilter }
 
     var clampedOpacity: Double { min(max(controlsOpacity, 0.25), 1.0) }
     var clampedScale: Double { min(max(controlsScale, 0.7), 1.35) }
