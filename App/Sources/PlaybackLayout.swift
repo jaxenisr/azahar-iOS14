@@ -234,6 +234,11 @@ struct HUDMetrics {
     static let rowGap: CGFloat = 3
     static let heading = "PERFORMANCE"
 
+    /// The buttons under the rows. Their widths count towards the card's width:
+    /// with four of them the row is wider than the widest statistic, and a card
+    /// measured only from its rows would squeeze the last label into an ellipsis.
+    static let buttonTitles = ["Save", "Load", "Amiibo", "Audio"]
+
     let columns: Int
     let rowCount: Int
     let labelWidth: CGFloat
@@ -262,11 +267,16 @@ struct HUDMetrics {
         // Two 24 pt icon buttons, 4 pt apart, a 6 pt gap after the heading.
         let headerWidth = headingWidth + 6 + 24 + 4 + 24
 
+        // The buttons are 9 pt, 6 pt of padding a side, 5 pt apart.
+        let buttonFont = UIFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
+        let buttonsWidth = buttonTitles.reduce(CGFloat(0)) { $0 + textWidth($1, buttonFont) + 12 }
+            + CGFloat(max(buttonTitles.count - 1, 0)) * 5
+
         let rows = max(labels.count, widestValues.count)
         let columns = max(columns, 1)
         let perColumn = Int((Double(rows) / Double(columns)).rounded(.up))
         let columnsWidth = CGFloat(columns) * rowWidth + CGFloat(columns - 1) * columnGap
-        let body = max(columnsWidth, headerWidth)
+        let body = max(max(columnsWidth, headerWidth), buttonsWidth)
         let height = padding * 2 + headerHeight + rowSpacing
             + CGFloat(perColumn) * rowHeight + CGFloat(max(perColumn - 1, 0)) * rowGap
             + rowSpacing + buttonsHeight
