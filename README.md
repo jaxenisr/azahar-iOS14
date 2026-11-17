@@ -38,6 +38,9 @@ Tested on an iPad 8th gen (A12) running iPadOS 14.7.1.
   switch per cheat on the Emulation page. The core loads the file itself at start.
 - Texture packs: a folder per title in `Documents/Azahar/load/textures`, with the
   load and dump switches beside the other graphics options.
+- Amiibo: a dump per figure in `Documents/Azahar/amiibo`, loaded from the player
+  while the game is asking for a tag. The core writes progress back into its copy,
+  so your own dump is never modified.
 - A HUD with real numbers: fps, speed %, frame time, audio buffer and underruns.
 
 ## Performance, honestly
