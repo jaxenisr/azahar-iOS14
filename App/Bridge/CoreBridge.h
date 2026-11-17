@@ -130,6 +130,37 @@ FOUNDATION_EXPORT const char *AZCoreRendererName(void);
 /// YES when frames are arriving from the GPU rather than as CPU bitmaps.
 FOUNDATION_EXPORT BOOL AZCoreUsesHardwareVideo(void);
 
+/// The amiibo reader.
+///
+/// The core exposes NFC only on its own HLE service (`nfc:u`), never through
+/// libretro, so these three functions are implemented in
+/// `App/CoreExtras/AmiiboLink.cpp`: that file is compiled by
+/// `scripts/build-core.sh` with the core's own flags and merged into
+/// `libazahar_core.a`, which is how the app calls the same code the desktop
+/// frontend does without forking Azahar.
+///
+/// A tag is a file. The core reads 0x21C bytes from the path it is given, takes
+/// it only while the running game is scanning for one, and writes an in-game
+/// change back into that same path. So the app hands over its own copy and the
+/// user's dump is only ever read.
+///
+/// Where the reader is in its life cycle, as one of these numbers; the strings
+/// live in the Swift layer so the wording stays with the rest of the UI.
+/// 0: no game, or a title with no NFC service.
+/// 1: a game is running and has not asked for a tag.
+/// 2: the game is asking for a tag and the reader is empty.
+/// 3: a tag is loaded.
+FOUNDATION_EXPORT int AZCoreAmiiboCurrentState(void);
+
+/// Hands one dump to the reader: 1 when the core took it, 0 when it refused
+/// (no game, no service, a tag already loaded, or a file the core could not
+/// read as an amiibo).
+FOUNDATION_EXPORT int AZCoreAmiiboLoad(const char *path);
+
+/// Takes the tag off the reader. The game sees it leave, as it would with a
+/// figure lifted off the console.
+FOUNDATION_EXPORT void AZCoreAmiiboRemove(void);
+
 /// Presents the stacked layout with a hinge between the two screens.
 ///
 /// `hinge` is the gap as a fraction of the presented pair's height, 0 to present
