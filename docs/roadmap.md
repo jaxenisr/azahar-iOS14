@@ -44,6 +44,27 @@ source at tag `2127.0-rc3`, never by guessing what it supports.
   is compiled by `scripts/build-core.sh` with the core's own flags and merged into
   `libazahar_core.a`: Azahar is not forked, and the app calls the same service the
   desktop frontend's "Load Amiibo" does.
+- **CPU JIT**: the emulated ARM11 runs as compiled code when this process is
+  allowed to run the code it generates, and is interpreted when it is not. The
+  pinned core refuses the JIT on iOS — `src/citra_libretro/core_settings.cpp`
+  writes `use_cpu_jit = false` under `#ifdef IOS` and does not register the option
+  — and it writes that at the start of *every* load. `Core::System::Init` reads
+  the same setting when it builds the CPU, so the only window is between the two,
+  and the app is told about it: the first thing the core asks for inside
+  `retro_load_game` is the pixel format, and the frontend answers from
+  `App/Bridge/CoreBridge.mm`. When `App/Bridge/JITProbe.c` has proved that the
+  process can execute code it generates — a page mapped executable, made
+  writable, written, made executable again and run, which is exactly what
+  Dynarmic's code cache does through oaknut on iOS — the app asks the core for
+  Dynarmic at that point; otherwise it asks for nothing and the core interprets
+  (FastInterp). `App/CoreExtras/JitLink.cpp` is the whole core-side of it,
+  compiled by `scripts/build-core.sh` with the core's own flags like the amiibo
+  reader, so Azahar is still not forked. Nothing is stored and there is no switch
+  to remember: the permission belongs to the process, so it is read on every load.
+  Under TrollStore it comes from TrollStore's own JIT before launch; on a build
+  signed with `get-task-allow` it comes from an attached debugger. This app
+  declares no entitlement for it, deliberately: an IPA that asks for one its
+  installer cannot grant is an IPA that will not install.
 - **Artic Base**: streaming, from the Games page's menu. The address is the
   content: `articbase://<host>[:<port>]` is dispatched by the core's own loader
   (`src/core/loader/loader.cpp`), which reads port 5543 when none is given and
@@ -72,16 +93,6 @@ follow.
 
 Dependency: the usage string, and a device to judge. Neither can be verified in CI
 beyond compiling.
-
-## 2. A CPU JIT, if the OS ever allows one
-
-FastInterp is what runs now, and it is the reason the CPU side is as fast as it
-is without an executable-memory entitlement. A JIT needs
-`com.apple.security.cs.allow-jit`, which on this install path is not available.
-This entry exists so the absence is a documented decision rather than an
-oversight.
-
-Dependency: an install method that grants the entitlement. Until then, nothing.
 
 ## Out of scope
 
