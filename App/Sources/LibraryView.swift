@@ -26,10 +26,20 @@ private struct LibrarySection: Identifiable {
     var id: String { letter }
 }
 
+/// What the library can present. One item-driven sheet rather than a flag per
+/// panel: iOS 14 keeps only the last sheet bound to a view, so an importer flag
+/// and a streaming flag would silently fight over the presentation.
+private enum LibraryPanel: String, Identifiable {
+    case importer
+    case articBase
+
+    var id: String { rawValue }
+}
+
 struct LibraryView: View {
     @EnvironmentObject private var library: GameLibrary
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var isImporting = false
+    @State private var panel: LibraryPanel?
     @State private var selected: GameEntry?
     @State private var menuGame: GameEntry?
     @State private var mode: LibraryMode = .games
@@ -87,9 +97,16 @@ struct LibraryView: View {
             }
         }
         .background(Design.Palette.background.ignoresSafeArea())
-        .sheet(isPresented: $isImporting) {
-            DocumentPicker { urls in
-                library.importFiles(urls)
+        .sheet(item: $panel) { panel in
+            switch panel {
+            case .importer:
+                DocumentPicker { urls in
+                    library.importFiles(urls)
+                }
+            case .articBase:
+                ArticBaseSheet(coreDirectory: library.coreDirectory) {
+                    self.panel = nil
+                }
             }
         }
         .actionSheet(isPresented: Binding(get: { menuGame != nil },
@@ -123,7 +140,7 @@ struct LibraryView: View {
                 Spacer(minLength: Design.Space.xs)
                 HStack(spacing: Design.Space.xs) {
                     CircleButton(symbol: "plus", label: "Import a game") {
-                        isImporting = true
+                        panel = .importer
                     }
                     moreButton
                     systemsButton
@@ -150,15 +167,19 @@ struct LibraryView: View {
         }
     }
 
-    /// Two real actions and no invented ones: rescanning the folder matters when a
-    /// file was added over Files.app while the app was open.
+    /// Three real actions and no invented ones: rescanning the folder matters when a
+    /// file was added over Files.app while the app was open, and a console on the
+    /// network is the one source that is not a file in that folder.
     private var moreButton: some View {
         Menu {
             Button(action: { library.reload() }) {
                 Label("Rescan library", systemImage: "arrow.clockwise")
             }
-            Button(action: { isImporting = true }) {
+            Button(action: { panel = .importer }) {
                 Label("Import a game", systemImage: "plus")
+            }
+            Button(action: { panel = .articBase }) {
+                Label("Stream from a console", systemImage: "wifi")
             }
         } label: {
             circleLabel("ellipsis")
@@ -457,7 +478,7 @@ struct GameDetailView: View {
                         .entrance(1)
 
                         SettingsCard("File") {
-                            infoRow("Name", game.url.lastPathComponent)
+                            infoRow("Name", game.url?.lastPathComponent ?? game.title)
                             infoRow("Size", game.subtitle)
                             infoRow("Core", library.coreDescription)
                         }
