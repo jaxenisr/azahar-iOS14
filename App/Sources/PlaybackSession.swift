@@ -279,6 +279,13 @@ final class PlaybackSession: ObservableObject, Identifiable {
         // here because the core's own value is an integer while this option takes
         // a region name, and the alias would be read as the wrong type.
         AZCoreSetOption("citra_region_value", settings.effectiveRegion.rawValue)
+        // Console model and texture filter are parsed with the rest of the core
+        // options at load. The model changes how much CPU and memory the emulated
+        // machine has; the filter only changes how textures are sampled. The
+        // filter values are the core's own option values, and the two it cannot
+        // honour are not offered in the UI at all.
+        AZCoreSetOption("citra_is_new_3ds", settings.effectiveConsoleModel.rawValue)
+        AZCoreSetOption("citra_texture_filter", settings.effectiveTextureFilter.rawValue)
         // The core reads touch from the pointer device; there is no mouse here.
         AZCoreSetOption("citra_enable_touch_touchscreen", "enabled")
         AZCoreSetOption("citra_enable_mouse_touchscreen", "disabled")
