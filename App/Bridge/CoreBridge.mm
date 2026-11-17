@@ -1,5 +1,6 @@
 #import "CoreBridge.h"
 #import "CoreVulkan.h"
+#import "JITProbe.h"
 
 #import <CoreGraphics/CoreGraphics.h>
 
@@ -13,6 +14,13 @@
 
 #include "libretro.h"
 #include "libretro_vulkan.h"
+
+// Defined in App/CoreExtras/JitLink.cpp, which scripts/build-core.sh compiles with
+// the core's own flags and merges into libazahar_core.a. It is a frontend shim for
+// the core, so it carries C linkage like the core's own entry points, and nothing
+// in Swift calls it: the JIT is asked for here, while the core is loading, not by
+// the interface.
+extern "C" void AZCoreRequestJIT(void);
 
 // Frontend for Azahar's libretro core.
 //
@@ -211,6 +219,18 @@ bool environment_callback(unsigned cmd, void *data) {
         const bool supported = format == RETRO_PIXEL_FORMAT_XRGB8888;
         write_log("info", supported ? "pixel format: XRGB8888\n"
                                     : "pixel format: requested format is not supported\n");
+        // This is the core's first request inside every load, and it comes after
+        // the core has read its own options (which, on iOS, is where it writes
+        // `use_cpu_jit = false`) and before it creates the CPU. So it is the only
+        // place where the answer can still be changed: ask for Dynarmic when this
+        // process has been shown to execute code it generates, and leave the core
+        // interpreting otherwise.
+        const bool jit = AZJITExecutableMemoryWorks();
+        if (supported && jit) {
+            AZCoreRequestJIT();
+        }
+        write_log("info", jit ? "CPU JIT: Dynarmic\n"
+                              : "CPU JIT: no executable memory here, FastInterp\n");
         return supported;
     }
     case RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION: {
@@ -388,7 +408,10 @@ bool environment_callback(unsigned cmd, void *data) {
         return true;
     }
     case RETRO_ENVIRONMENT_GET_JIT_CAPABLE: {
-        *static_cast<bool *>(data) = false;
+        // The pinned core defines `LibRetro::CanUseJIT()` but never calls it, so
+        // nothing depends on this answer today. It is answered from the same probe
+        // as the JIT request above: the truth about this process, not a guess.
+        *static_cast<bool *>(data) = AZJITExecutableMemoryWorks();
         return true;
     }
     default:
