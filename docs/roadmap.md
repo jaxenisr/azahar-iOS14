@@ -26,18 +26,16 @@ source at tag `2127.0-rc3`, never by guessing what it supports.
   `[name]` blocks the core would load, and a switch adds or removes the
   `*citra_enabled` line inside a block — the only thing that decides whether a
   cheat runs. Nothing about cheats is stored in the app, and no save is touched.
+- **Texture packs** (`citra_custom_textures`, `citra_dump_textures`): a pack is a
+  folder, `Documents/Azahar/load/textures/<title id>/`, which the core scans itself
+  at load — recursively, taking only `.png`, `.dds` and `.ktx`. The Emulation page
+  lists what each title has and what its `pack.json` says, and the two switches
+  (load packs, dump this title's own textures) sit with the other graphics options.
+  Dumps go to `dump/textures/<title id>/`, a different folder, because that is where
+  the core writes them. Nothing about a pack is stored in the app: it is a folder on
+  disk, and the memory it costs on a 3 GB device is its real price.
 
-## 1. Texture packs
-
-A folder per title id, loaded at boot. The core does the work (`citra_custom_textures`
-is already in its option list); the frontend has to find the folder, name the title
-id, say what was loaded, and offer the dump switch that writes the textures out. The
-memory cost on a 3 GB device is the real risk, not the plumbing.
-
-Dependency: the same title-id work the cheat file already needed, and a
-`Textures/` layout from the core's own source.
-
-## 2. Camera and amiibo
+## 1. Camera and amiibo
 
 Camera: the core asks for an image; iOS gives one through an AVCaptureSession,
 which needs its own usage string and a graceful refusal on a device with no
@@ -47,7 +45,7 @@ prompt.
 Dependency: permissions, and a device to judge. Neither can be verified in CI
 beyond compiling.
 
-## 3. Artic Base
+## 2. Artic Base
 
 Streaming content from a PC instead of copying it to the iPad. The core already
 dispatches `articbase://<ip>[:<port>]` in `src/core/loader/loader.cpp`, so the work
@@ -56,7 +54,7 @@ that it becomes a second way to load a game that drifts from the first.
 
 Dependency: a server to talk to, which means it cannot be finished here.
 
-## 4. A CPU JIT, if the OS ever allows one
+## 3. A CPU JIT, if the OS ever allows one
 
 FastInterp is what runs now, and it is the reason the CPU side is as fast as it
 is without an executable-memory entitlement. A JIT needs

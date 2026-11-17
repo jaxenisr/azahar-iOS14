@@ -36,6 +36,8 @@ Tested on an iPad 8th gen (A12) running iPadOS 14.7.1.
   Emulation page, all read when a game starts.
 - Cheats: one Gateway cheat file per title in `Documents/Azahar/cheats`, with a
   switch per cheat on the Emulation page. The core loads the file itself at start.
+- Texture packs: a folder per title in `Documents/Azahar/load/textures`, with the
+  load and dump switches beside the other graphics options.
 - A HUD with real numbers: fps, speed %, frame time, audio buffer and underruns.
 
 ## Performance, honestly

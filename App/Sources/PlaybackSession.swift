@@ -286,6 +286,12 @@ final class PlaybackSession: ObservableObject, Identifiable {
         // honour are not offered in the UI at all.
         AZCoreSetOption("citra_is_new_3ds", settings.effectiveConsoleModel.rawValue)
         AZCoreSetOption("citra_texture_filter", settings.effectiveTextureFilter.rawValue)
+        // Texture packs and dumping are two more switches in the same table, both
+        // read at load. Packs come from load/textures/<title id>/; dumps go to
+        // dump/textures/<title id>/, the core's own folder, which is why the UI
+        // names two paths rather than one.
+        AZCoreSetOption("citra_custom_textures", settings.customTexturesEnabled ? "Enabled" : "Disabled")
+        AZCoreSetOption("citra_dump_textures", settings.dumpTexturesEnabled ? "Enabled" : "Disabled")
         // The core reads touch from the pointer device; there is no mouse here.
         AZCoreSetOption("citra_enable_touch_touchscreen", "enabled")
         AZCoreSetOption("citra_enable_mouse_touchscreen", "disabled")

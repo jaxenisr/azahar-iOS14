@@ -9,8 +9,6 @@ import Foundation
 ///
 /// Nothing here is a PlayStation option: this list is the 3DS core's own set.
 enum PlannedFeature: String, CaseIterable, Identifiable {
-    /// Custom texture packs: not wired, and the memory cost is a real risk on 3 GB.
-    case texturePacks
     /// Camera feed for amiibo photos: no capture session, no core surface for it.
     case cameraFeed
     /// Artic Base: the core can stream from a real 3DS, there is no connection UI.
@@ -23,7 +21,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// The row's title, as it will read on the settings screen.
     var title: String {
         switch self {
-        case .texturePacks: return "Texture packs"
         case .cameraFeed: return "Camera"
         case .articBase: return "Artic Base"
         case .cpuJIT: return "CPU JIT"
@@ -34,8 +31,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// under its title, so it has to be true rather than reassuring.
     var missing: String {
         switch self {
-        case .texturePacks:
-            return "Not wired, and memory-heavy on 3 GB"
         case .cameraFeed:
             return "No capture session in the app"
         case .articBase:
@@ -48,7 +43,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// The one line to change when a feature is wired up.
     var isAvailable: Bool {
         switch self {
-        case .texturePacks: return false
         case .cameraFeed: return false
         case .articBase: return false
         case .cpuJIT: return false
