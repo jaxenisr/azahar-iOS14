@@ -20,27 +20,24 @@ source at tag `2127.0-rc3`, never by guessing what it supports.
   the graphics API is Vulkan (the only API this app presents through on iOS), and
   the parser compares against `"xBRZ freescale"` while the option list advertises
   `"xBRZ"`.
+- **Cheats**: the core loads `Documents/Azahar/cheats/<title id>.txt` by itself
+  when a game starts (`System::Load` calls `CheatEngine::LoadCheatFile`), so the
+  app's job is the file: it reads the title id out of the NCCH header, lists the
+  `[name]` blocks the core would load, and a switch adds or removes the
+  `*citra_enabled` line inside a block — the only thing that decides whether a
+  cheat runs. Nothing about cheats is stored in the app, and no save is touched.
 
-## 1. Cheats
-
-The core exposes memory reads and writes; a cheat list is a file per title, a
-parser for the two common formats, and a toggle per cheat. The risk is not the
-UI, it is that a bad write corrupts a save, so it needs an explicit confirm and a
-copy of the save before the first write.
-
-Dependency: nothing upstream, but it is the first feature that can destroy user
-data.
-
-## 2. Texture packs
+## 1. Texture packs
 
 A folder per title id, loaded at boot. The core does the work (`citra_custom_textures`
-is already in its option list); the frontend has to find the folder, name the
-title id, say what was loaded, and offer the dump switch that writes the textures
-out. The memory cost on a 3 GB device is the real risk, not the plumbing.
+is already in its option list); the frontend has to find the folder, name the title
+id, say what was loaded, and offer the dump switch that writes the textures out. The
+memory cost on a 3 GB device is the real risk, not the plumbing.
 
-Dependency: `Textures/` layout documented in the core's own source.
+Dependency: the same title-id work the cheat file already needed, and a
+`Textures/` layout from the core's own source.
 
-## 3. Camera and amiibo
+## 2. Camera and amiibo
 
 Camera: the core asks for an image; iOS gives one through an AVCaptureSession,
 which needs its own usage string and a graceful refusal on a device with no
@@ -50,7 +47,7 @@ prompt.
 Dependency: permissions, and a device to judge. Neither can be verified in CI
 beyond compiling.
 
-## 4. Artic Base
+## 3. Artic Base
 
 Streaming content from a PC instead of copying it to the iPad. The core already
 dispatches `articbase://<ip>[:<port>]` in `src/core/loader/loader.cpp`, so the work
@@ -59,7 +56,7 @@ that it becomes a second way to load a game that drifts from the first.
 
 Dependency: a server to talk to, which means it cannot be finished here.
 
-## 5. A CPU JIT, if the OS ever allows one
+## 4. A CPU JIT, if the OS ever allows one
 
 FastInterp is what runs now, and it is the reason the CPU side is as fast as it
 is without an executable-memory entitlement. A JIT needs
@@ -78,3 +75,8 @@ not a phase of this one.
 **Stereoscopic 3D.** The core has `citra_render_3d` and `citra_factor_3d`, but the
 picture here is composed by this app for a flat display, and a phone-style
 anaglyph or cardboard mode is not what an iPad in a case is for.
+
+**A cheat browser.** Everything in the app is what you bring: the ROM, the system
+files, and now the cheat file. Downloading cheat collections means shipping a
+database of other people's work and keeping it current, so cheats stay a file you
+import rather than a catalogue you browse.

@@ -43,6 +43,29 @@ enum ROMReader {
         return ROMMetadata(title: title(from: smdh), icon: icon(from: smdh))
     }
 
+    /// The title id the core derives from the header (`ReadProgramId`), as the 16
+    /// uppercase hex digits a cheat file is named after. Nil when the container is
+    /// not a readable NCSD: a .zcci is compressed and cannot be read, and a file
+    /// whose NCCH magic is not where it should be is left to the core.
+    ///
+    /// The offset comes from the core's own `NCCH_Header`
+    /// (`src/core/file_sys/ncch_container.h`): magic at 0x100, partition id at
+    /// 0x108, maker code at 0x110, version at 0x112, then four reserved bytes, so
+    /// `program_id` begins at 0x118 and is little endian.
+    static func titleID(url: URL, fileExtension: String) -> String? {
+        guard fileExtension.lowercased() != "zcci" else { return nil }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        guard let ncchOffset = gamePartitionOffset(in: handle),
+              let ncch = read(handle, at: ncchOffset, count: 0x200),
+              ascii(ncch, at: 0x100, length: 4) == "NCCH",
+              let programID = u64(ncch, 0x118) else {
+            return nil
+        }
+        return String(format: "%016llX", programID)
+    }
+
     // MARK: - Container
 
     /// Offset of the first NCCH in an NCSD (.3ds/.cci). Nil when the file is not
@@ -155,6 +178,16 @@ enum ROMReader {
             | (UInt32(data[base + 1]) << 8)
             | (UInt32(data[base + 2]) << 16)
             | (UInt32(data[base + 3]) << 24)
+    }
+
+    private static func u64(_ data: Data, _ offset: Int) -> UInt64? {
+        guard offset >= 0, offset + 8 <= data.count else { return nil }
+        let base = data.startIndex + offset
+        var value: UInt64 = 0
+        for index in (0..<8).reversed() {
+            value = (value << 8) | UInt64(data[base + index])
+        }
+        return value
     }
 
     /// NUL-padded ASCII name, or nil for an empty slot.

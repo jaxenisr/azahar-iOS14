@@ -34,6 +34,8 @@ Tested on an iPad 8th gen (A12) running iPadOS 14.7.1.
   volume, control opacity and size.
 - Console model (New 3DS or the original), texture filter and system region on the
   Emulation page, all read when a game starts.
+- Cheats: one Gateway cheat file per title in `Documents/Azahar/cheats`, with a
+  switch per cheat on the Emulation page. The core loads the file itself at start.
 - A HUD with real numbers: fps, speed %, frame time, audio buffer and underruns.
 
 ## Performance, honestly

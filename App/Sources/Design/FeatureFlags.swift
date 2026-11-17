@@ -9,8 +9,6 @@ import Foundation
 ///
 /// Nothing here is a PlayStation option: this list is the 3DS core's own set.
 enum PlannedFeature: String, CaseIterable, Identifiable {
-    /// Cheats: the core has no cheat loader wired in this build.
-    case cheats
     /// Custom texture packs: not wired, and the memory cost is a real risk on 3 GB.
     case texturePacks
     /// Camera feed for amiibo photos: no capture session, no core surface for it.
@@ -25,7 +23,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// The row's title, as it will read on the settings screen.
     var title: String {
         switch self {
-        case .cheats: return "Cheats"
         case .texturePacks: return "Texture packs"
         case .cameraFeed: return "Camera"
         case .articBase: return "Artic Base"
@@ -37,8 +34,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// under its title, so it has to be true rather than reassuring.
     var missing: String {
         switch self {
-        case .cheats:
-            return "No cheat loader in this build"
         case .texturePacks:
             return "Not wired, and memory-heavy on 3 GB"
         case .cameraFeed:
@@ -53,7 +48,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     /// The one line to change when a feature is wired up.
     var isAvailable: Bool {
         switch self {
-        case .cheats: return false
         case .texturePacks: return false
         case .cameraFeed: return false
         case .articBase: return false
