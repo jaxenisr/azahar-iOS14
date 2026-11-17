@@ -34,15 +34,30 @@ source at tag `2127.0-rc3`, never by guessing what it supports.
   Dumps go to `dump/textures/<title id>/`, a different folder, because that is where
   the core writes them. Nothing about a pack is stored in the app: it is a folder on
   disk, and the memory it costs on a 3 GB device is its real price.
+- **Amiibo**: a tag is a file, `Documents/Azahar/amiibo/<name>.bin` — one NTAG215
+  dump, exactly 0x21C bytes, which is what the core's `nfc:u` service reads. The
+  player's HUD opens the sheet while a game runs: it says whether the game is
+  asking for a tag, hands one over when it is, and takes it off again. The core
+  writes an in-game change back into the copy it was given, so the user's own dump
+  is only ever read, and an encrypted dump without NFC keys is loaded read-only.
+  The reader has no libretro entry point at all, so `App/CoreExtras/AmiiboLink.cpp`
+  is compiled by `scripts/build-core.sh` with the core's own flags and merged into
+  `libazahar_core.a`: Azahar is not forked, and the app calls the same service the
+  desktop frontend's "Load Amiibo" does.
 
-## 1. Camera and amiibo
+## 1. The camera
 
 Camera: the core asks for an image; iOS gives one through an AVCaptureSession,
-which needs its own usage string and a graceful refusal on a device with no
-camera. Amiibo: reads an NFC tag, and on iOS that is CoreNFC with a per-scan
-prompt.
+which needs `NSCameraUsageDescription` in `App/Info.plist`. That file is part of
+this project's build contract and is not edited casually, so the feature waits for
+the key to be added deliberately rather than being bolted on. What is known from
+the pinned core: the camera is a frontend factory (`Camera::RegisterFactory`), the
+libretro core registers none, so every title today gets the core's `BlankCamera`;
+the factory would return `u16` frames in RGB565 or YUV422 at the resolution and
+flip the game asks for. The desktop frontend's still-image camera is the shape to
+follow.
 
-Dependency: permissions, and a device to judge. Neither can be verified in CI
+Dependency: the usage string, and a device to judge. Neither can be verified in CI
 beyond compiling.
 
 ## 2. Artic Base
