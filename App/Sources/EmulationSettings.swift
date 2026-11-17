@@ -188,6 +188,12 @@ struct EmulationSettings: Codable, Equatable {
     /// untouched state is what this app has always played at.
     var consoleModel: ConsoleModel?
     var textureFilter: TextureFilter?
+    /// The core's `citra_custom_textures`. Off is the core's own default, so an
+    /// untouched install plays the title's own textures.
+    var customTexturesEnabled: Bool = false
+    /// The core's `citra_dump_textures`. A tool for making packs rather than a way
+    /// to play: it writes every texture the title loads to disk.
+    var dumpTexturesEnabled: Bool = false
     var volume: Double = 0.8
     var isMuted: Bool = false
     var hapticsEnabled: Bool = true
@@ -227,6 +233,8 @@ struct EmulationSettings: Codable, Equatable {
                                                 Default.consoleModel)
         textureFilter = EmulationSettings.chosen(try container.decodeIfPresent(TextureFilter.self, forKey: .textureFilter),
                                                  Default.textureFilter)
+        customTexturesEnabled = try container.decodeIfPresent(Bool.self, forKey: .customTexturesEnabled) ?? false
+        dumpTexturesEnabled = try container.decodeIfPresent(Bool.self, forKey: .dumpTexturesEnabled) ?? false
         volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0.8
         isMuted = try container.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
         hapticsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
@@ -238,6 +246,7 @@ struct EmulationSettings: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case resolutionScale, layout, speed, cpuClockPercent, region, consoleModel, textureFilter
+        case customTexturesEnabled, dumpTexturesEnabled
         case volume, isMuted, hapticsEnabled, controlsOpacity, controlsScale
         case customControlsEnabled, controlPreset
     }
