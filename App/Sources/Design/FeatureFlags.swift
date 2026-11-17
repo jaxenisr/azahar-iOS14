@@ -11,8 +11,6 @@ import Foundation
 enum PlannedFeature: String, CaseIterable, Identifiable {
     /// Camera feed for amiibo photos: no capture session, no core surface for it.
     case cameraFeed
-    /// Artic Base: the core can stream from a real 3DS, there is no connection UI.
-    case articBase
     /// CPU JIT: needs a TrollStore JIT entitlement the app does not request.
     case cpuJIT
 
@@ -22,7 +20,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .cameraFeed: return "Camera"
-        case .articBase: return "Artic Base"
         case .cpuJIT: return "CPU JIT"
         }
     }
@@ -33,8 +30,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
         switch self {
         case .cameraFeed:
             return "No capture session in the app"
-        case .articBase:
-            return "Core can stream, no connection UI"
         case .cpuJIT:
             return "Needs a JIT entitlement the app does not request"
         }
@@ -44,7 +39,6 @@ enum PlannedFeature: String, CaseIterable, Identifiable {
     var isAvailable: Bool {
         switch self {
         case .cameraFeed: return false
-        case .articBase: return false
         case .cpuJIT: return false
         }
     }
