@@ -15,13 +15,25 @@ struct PlaybackScreen: View {
     @ObservedObject private var controllers = ControllerMonitor.shared
     @Environment(\.presentationMode) private var presentationMode
     @State private var showsOverlay = true
-    @State private var showsDiagnostics = false
+    /// The panel the player has open, if any. One item-driven sheet rather than
+    /// an `isPresented` flag per panel: iOS 14 keeps only the last sheet bound to
+    /// a view, so two would silently fight over the presentation.
+    @State private var panel: PlayerPanel?
     /// The experimental layout's editing mode: while it is on, dragging a handle
     /// changes a draft, and only Done writes it to the title's override.
     @State private var editingControls = false
     @State private var draftOffsets: [String: ControlOffset] = [:]
 
     private var settings: EmulationSettings { store.global.emulation }
+
+    /// The sheets the player can present. Diagnostics reports the audio and touch
+    /// path; amiibo hands a tag to the core while the game is asking for one.
+    private enum PlayerPanel: String, Identifiable {
+        case diagnostics
+        case amiibo
+
+        var id: String { rawValue }
+    }
 
     /// The screen ignores the safe area, so the geometry reader reports none. The
     /// window still knows where the home indicator and the rounded corners are.
@@ -119,8 +131,16 @@ struct PlaybackScreen: View {
         .onChange(of: settings.isMuted) { value in
             AudioOutput.shared.setMuted(value)
         }
-        .sheet(isPresented: $showsDiagnostics) {
-            AudioDiagnosticsView()
+        .sheet(item: $panel) { panel in
+            switch panel {
+            case .diagnostics:
+                AudioDiagnosticsView()
+            case .amiibo:
+                AmiiboScreen(coreDirectory: session.coreDirectory,
+                             gameTitle: session.game.title) {
+                    self.panel = nil
+                }
+            }
         }
     }
 
@@ -374,7 +394,8 @@ struct PlaybackScreen: View {
             HStack(spacing: 5) {
                 statisticButton("Save") { session.saveState() }
                 statisticButton("Load") { session.loadState() }
-                statisticButton("Audio") { showsDiagnostics = true }
+                statisticButton("Amiibo") { panel = .amiibo }
+                statisticButton("Audio") { panel = .diagnostics }
             }
             .frame(height: HUDMetrics.buttonsHeight)
         }
