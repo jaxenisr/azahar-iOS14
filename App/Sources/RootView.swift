@@ -437,15 +437,15 @@ struct EmulationView: View {
                                 store.updateGlobal { $0.consoleModel = model }
                             }
                             RowDivider()
-                            // Not a choice: whether generated code may run is a
-                            // property of the process this app was launched in,
-                            // so the row reports it instead of offering it.
-                            SettingRow("CPU JIT", subtitle: CPUJIT.explanation) {
-                                Text(CPUJIT.state)
-                                    .font(Design.Fonts.caption.weight(.semibold))
-                                    .foregroundColor(CPUJIT.isAvailable
-                                                     ? Design.Palette.accent
-                                                     : Design.Palette.secondaryInk)
+                            // Permission is the process's, not the setting's: the
+                            // row offers a choice, and the subtitle reports what
+                            // that choice amounts to on this launch.
+                            MenuSettingRow(title: "CPU JIT",
+                                           subtitle: CPUJIT.explanation(for: settings.cpuJIT),
+                                           options: CPUJITMode.allCases
+                                               .map { MenuSettingRow<CPUJITMode>.Option(title: $0.title, value: $0) },
+                                           selection: settings.cpuJIT) { mode in
+                                store.updateGlobal { $0.cpuJIT = mode }
                             }
                         }
                         .entrance(1)
