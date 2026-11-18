@@ -1,11 +1,15 @@
 #include "JITProbe.h"
 
 #include <libkern/OSCacheControl.h>
+#include <limits.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 // The four steps below are the ones oaknut's CodeBlock takes on iOS, at the
 // oaknut commit the pinned core's Dynarmic uses (include/oaknut/code_block.hpp,
@@ -108,4 +112,47 @@ bool AZJITExecutableMemoryWorks(void) {
         g_result = probe() ? 1 : 0;
     }
     return g_result == 1;
+}
+
+// What the user asked for, as opposed to what the process allows. Read by the
+// shim that talks to the core, never by the probe.
+static int g_allowed = 0;
+
+void AZJITSetAllowed(bool allowed) {
+    g_allowed = allowed ? 1 : 0;
+}
+
+bool AZJITAllowed(void) {
+    return g_allowed != 0;
+}
+
+// A load that asks for the JIT leaves this file behind and removes it at its
+// first frame. A process that dies running generated code never reaches that
+// frame, so the file outlives it and the next launch finds it. That is the only
+// way to hear about such a crash: nothing inside the process that faulted gets to
+// report it. HOME is this app's own container on iOS.
+static char g_attempt_path[PATH_MAX];
+
+static const char *attempt_path(void) {
+    if (g_attempt_path[0] == '\0') {
+        const char *home = getenv("HOME");
+        snprintf(g_attempt_path, sizeof(g_attempt_path), "%s/Library/Caches/cpu-jit-attempt",
+                 home != NULL ? home : "/tmp");
+    }
+    return g_attempt_path;
+}
+
+bool AZJITAttemptPending(void) {
+    return access(attempt_path(), F_OK) == 0;
+}
+
+void AZJITNoteAttempt(void) {
+    FILE *file = fopen(attempt_path(), "w");
+    if (file != NULL) {
+        fclose(file);
+    }
+}
+
+void AZJITClearAttempt(void) {
+    remove(attempt_path());
 }
