@@ -20,12 +20,28 @@
 // process (TrollStore's JIT, or a debugger attached to a build that carries
 // `get-task-allow`), and the core builds Dynarmic only when the CPU it creates is
 // asked for it on arm64.
+//
+// What this does decide is whether to ask. The frontend calls it only after
+// proving the process can execute generated code, and the row on the Emulation
+// page can say no regardless: both have to agree. And because a fault inside
+// generated code cannot be caught by the process that asked for it, the request
+// leaves a breadcrumb (`App/Bridge/JITProbe.c`) that the load's first frame
+// removes. A launch that finds it still there is a launch that died here, and it
+// plays interpreted instead of dying again.
 
+#include "common/logging/log.h"
 #include "common/settings.h"
+
+#include "../Bridge/JITProbe.h"
 
 extern "C" {
 
 void AZCoreRequestJIT(void) {
+    if (!AZJITAllowed()) {
+        LOG_INFO(Core, "CPU JIT: not requested for this load");
+        return;
+    }
+    AZJITNoteAttempt();
     Settings::values.use_cpu_jit = true;
 }
 

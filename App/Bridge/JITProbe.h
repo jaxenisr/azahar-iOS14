@@ -22,6 +22,23 @@ extern "C" {
 /// The probe runs once per process; later calls return the first answer.
 bool AZJITExecutableMemoryWorks(void);
 
+/// Whether the next load may ask the core for the JIT.
+///
+/// The probe answers what the process allows; this answers what the user asked
+/// for. Both have to be true, and they are read in the shim the frontend calls
+/// while the core is loading (`App/CoreExtras/JitLink.cpp`) rather than here, so
+/// that the answer to "may generated code run" stays a fact about the process.
+void AZJITSetAllowed(bool allowed);
+bool AZJITAllowed(void);
+
+/// The breadcrumb a load leaves until its first frame, and the only way this app
+/// can learn about a crash in generated code: the process that faulted is gone,
+/// so the next launch finds the breadcrumb and plays interpreted instead. It
+/// lives in the app's caches, next to nothing else that matters.
+bool AZJITAttemptPending(void);
+void AZJITNoteAttempt(void);
+void AZJITClearAttempt(void);
+
 #ifdef __cplusplus
 }
 #endif

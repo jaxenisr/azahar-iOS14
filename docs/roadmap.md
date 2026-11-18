@@ -59,10 +59,16 @@ source at tag `2127.0-rc3`, never by guessing what it supports.
   Dynarmic at that point; otherwise it asks for nothing and the core interprets
   (FastInterp). `App/CoreExtras/JitLink.cpp` is the whole core-side of it,
   compiled by `scripts/build-core.sh` with the core's own flags like the amiibo
-  reader, so Azahar is still not forked. Nothing is stored and there is no switch
-  to remember: the permission belongs to the process, so it is read on every load.
-  Under TrollStore it comes from TrollStore's own JIT before launch; on a build
-  signed with `get-task-allow` it comes from an attached debugger. This app
+  reader, so Azahar is still not forked. The Emulation page offers the choice —
+  `Default`, `On`, `Off` — and `Default` is the app deciding per load: Dynarmic
+  when the probe passes, interpreted when it does not. The second half of that
+  decision is not caution for its own sake. A fault in generated code cannot be
+  caught by the process that asked for the code, so a load that asks records that
+  it did, its first frame clears the record, and a launch that finds the record
+  still there knows the previous one died at load: it interprets instead and says
+  so, and `On` is always there to try again. Under TrollStore the permission comes
+  from TrollStore's own JIT before launch; on a build signed with `get-task-allow`
+  it comes from an attached debugger. This app
   declares no entitlement for it, deliberately: an IPA that asks for one its
   installer cannot grant is an IPA that will not install.
 - **Artic Base**: streaming, from the Games page's menu. The address is the

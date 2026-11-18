@@ -44,7 +44,8 @@ Tested on an iPad 8th gen (A12) running iPadOS 14.7.1.
 - CPU JIT when the install allows one: if the app can run code it generates —
   TrollStore's JIT before launch, or a debugger attached to a build signed with
   `get-task-allow` — the emulated ARM11 is compiled as it runs. The Emulation page
-  says which is in force; without that permission the CPU is interpreted.
+  offers the choice and reports which is in force; without that permission the CPU
+  is interpreted, and so is the next load after one that died with the JIT on.
 - Artic Base: stream the title a console on your network has open, from the Games
   page's menu. The address is all it asks for, and nothing is copied to the iPad.
 - A HUD with real numbers: fps, speed %, frame time, audio buffer and underruns.

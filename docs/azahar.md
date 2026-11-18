@@ -95,6 +95,14 @@ A JIT in a process without that permission faults rather than falling back, whic
 is why the probe runs code rather than checking a flag. With no proof, the core
 interprets, which is how this app has always played.
 
+Whether it should is the user's call: the Emulation page offers `Default`, `On`
+and `Off`, and `Default` never overrules the process — it runs Dynarmic when the
+probe passes. Because a fault in generated code cannot be caught by the process
+that asked for it, a load that asks leaves a marker in the app's caches, that
+load's first frame removes it, and a launch that finds it still there knows the
+previous process died at load: it interprets instead and the row says so, with
+`On` there to try again at any time.
+
 `use_shader_jit` stays false: it is the core's x64 shader compiler, and this is
 arm64.
 

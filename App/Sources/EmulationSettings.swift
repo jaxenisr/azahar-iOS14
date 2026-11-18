@@ -188,6 +188,10 @@ struct EmulationSettings: Codable, Equatable {
     /// untouched state is what this app has always played at.
     var consoleModel: ConsoleModel?
     var textureFilter: TextureFilter?
+    /// The CPU JIT, when someone has chosen it. `nil` — the untouched state — lets
+    /// the app decide per load from what the process allows and from whether the
+    /// last JIT load survived.
+    var cpuJIT: CPUJITMode?
     /// The core's `citra_custom_textures`. Off is the core's own default, so an
     /// untouched install plays the title's own textures.
     var customTexturesEnabled: Bool = false
@@ -233,6 +237,9 @@ struct EmulationSettings: Codable, Equatable {
                                                 Default.consoleModel)
         textureFilter = EmulationSettings.chosen(try container.decodeIfPresent(TextureFilter.self, forKey: .textureFilter),
                                                  Default.textureFilter)
+        // No fallback to normalise against: `nil` is its own state here (decide per
+        // load), so a stored value is always a choice someone made.
+        cpuJIT = try container.decodeIfPresent(CPUJITMode.self, forKey: .cpuJIT)
         customTexturesEnabled = try container.decodeIfPresent(Bool.self, forKey: .customTexturesEnabled) ?? false
         dumpTexturesEnabled = try container.decodeIfPresent(Bool.self, forKey: .dumpTexturesEnabled) ?? false
         volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0.8
@@ -246,6 +253,7 @@ struct EmulationSettings: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case resolutionScale, layout, speed, cpuClockPercent, region, consoleModel, textureFilter
+        case cpuJIT
         case customTexturesEnabled, dumpTexturesEnabled
         case volume, isMuted, hapticsEnabled, controlsOpacity, controlsScale
         case customControlsEnabled, controlPreset

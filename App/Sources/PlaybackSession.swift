@@ -298,6 +298,11 @@ final class PlaybackSession: ObservableObject, Identifiable {
 
         AZCoreSetAudioCallback(playbackAudioCallback, nil)
 
+        // Whether this load may ask the core for Dynarmic. The core reads the answer
+        // while it loads and there is no way back out of a load that faults on
+        // generated code, so the decision is made here, before it starts.
+        let usesJIT = CPUJIT.beginLoad(settings.cpuJIT)
+
         guard AZCoreInitialize(coreDirectory.path, coreDirectory.path) else {
             fail(AZCoreLastError() ?? "the core failed to initialise")
             return
@@ -309,6 +314,9 @@ final class PlaybackSession: ObservableObject, Identifiable {
 
         let loaded = AZCoreLoadGame(game.location)
         if !loaded {
+            // A load that never started is not a crash: drop the breadcrumb this
+            // attempt would otherwise leave behind.
+            AZJITClearAttempt()
             let reason = loadFailure(AZCoreLastError())
             AZCoreSetFrameCallback(nil, nil)
             AZCoreSetMessageCallback(nil, nil)
@@ -342,6 +350,7 @@ final class PlaybackSession: ObservableObject, Identifiable {
         var framesAtReport: UInt64 = 0
         var delivered: UInt64 = 0
         var emulatedSeconds = 0.0
+        var jitAttemptCleared = false
 
         var lastBatchCalls = AZCoreAudioBatchCalls()
         var lastProduced: UInt64 = 0
@@ -353,6 +362,14 @@ final class PlaybackSession: ObservableObject, Identifiable {
             let frameStart = CACurrentMediaTime()
             AZCoreRunFrame()
             let frameEnd = CACurrentMediaTime()
+
+            // The first frame is the proof this load survived: the core ran and
+            // delivered. Clearing the breadcrumb here is what keeps a working JIT
+            // from being read as a crashed one on the next launch.
+            if usesJIT && !jitAttemptCleared {
+                jitAttemptCleared = true
+                AZJITClearAttempt()
+            }
 
             delivered &+= 1
             emulatedSeconds += frameEnd - frameStart
@@ -424,6 +441,14 @@ final class PlaybackSession: ObservableObject, Identifiable {
 
         AZCoreSetAudioCallback(nil, nil)
         AudioOutput.shared.stop()
+        // A load that asked for the JIT and cleared its attempt marker reached its
+        // first frame, which is the proof the JIT works here. The note only clears
+        // the memory of a load that did not.
+        if usesJIT && !AZJITAttemptPending() {
+            CPUJIT.noteHealthyLoad()
+        }
+        // Stopping is not crashing, whichever way this session ends.
+        AZJITClearAttempt()
         AZCoreUnloadGame()
         AZCoreSetFrameCallback(nil, nil)
         AZCoreSetMessageCallback(nil, nil)
@@ -519,4 +544,3 @@ private let playbackAudioCallback: AZCoreAudioCallback = { frames, frameCount, _
     guard let frames = frames, frameCount > 0 else { return }
     AudioOutput.shared.write(frames, frameCount: Int(frameCount))
 }
-
